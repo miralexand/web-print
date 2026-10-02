@@ -78,14 +78,15 @@
 
             <div class="stat-card">
               <div class="stat-head"><span class="stat-name">Cloudflare 隧道</span><span class="dot" :class="tunnel.running ? 'on' : 'off'"></span></div>
-              <div class="stat-value">{{ tunnel.url || '未启动' }}</div>
-              <div class="stat-desc">将本地 Web 服务安全发布到公网</div>
+              <div class="stat-value">{{ tunnel.running ? (tunnel.url || '运行中（命名隧道）') : '未启动' }}</div>
+              <div class="stat-desc">{{ tunnel.running ? (tunnel.managedByService ? '隧道由系统服务托管，运行中' : '已启动，可在隧道页查看详情') : '将本地 Web 服务安全发布到公网' }}</div>
               <div class="stat-actions">
-                <el-button :type="tunnel.running ? 'default' : 'primary'" size="small" @click="tunnelRunning ? stopTunnel() : startTunnel()" :loading="busy.tunnel">
+                <el-button :type="tunnel.running ? 'default' : 'primary'" size="small" @click="tunnel.running ? stopTunnel() : startTunnel()" :loading="busy.tunnel">
                   {{ tunnel.running ? '停止' : '启动' }}
                 </el-button>
                 <el-button size="small" @click="tab = 'tunnel'">配置</el-button>
               </div>
+            </div>
             </div>
           </div>
 

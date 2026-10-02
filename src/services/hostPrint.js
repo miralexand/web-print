@@ -36,6 +36,7 @@ async function submit(task) {
   const form = new FormData();
   form.append('file', new Blob([buffer], { type: mimeFor(filePath) }), task.originalName);
   form.append('copies', String(task.copies));
+  form.append('pages', task.pages || '');
   form.append('color', task.color);
   form.append('paperSize', task.paperSize || '');
   form.append('printer', task.printer || '');

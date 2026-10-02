@@ -2,6 +2,7 @@
 
 const $ = (id) => document.getElementById(id);
 let selectedFile = null;
+let previewUrl = null;
 let currentUser = null;
 let refreshTimer = null;
 let editingUserId = null;
@@ -126,12 +127,55 @@ dropzone.addEventListener('drop', (e) => {
   if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
 });
 fileInput.addEventListener('change', () => { if (fileInput.files.length) setFile(fileInput.files[0]); });
+$('clear-file-btn').addEventListener('click', () => clearFile(false));
 
 function setFile(file) {
   const maxMb = 20;
   if (file.size > maxMb * 1024 * 1024) { setMsg(`文件超过 ${maxMb}MB 限制`, false); return; }
+  clearFile(true);
   selectedFile = file;
   $('file-label').textContent = `${file.name}（${(file.size / 1024).toFixed(0)} KB）`;
+  showPreview(file);
+  setMsg('', true);
+}
+
+function showPreview(file) {
+  const img = $('preview-img');
+  const pdf = $('preview-pdf');
+  const generic = $('preview-generic');
+  img.classList.add('hidden');
+  pdf.classList.add('hidden');
+  generic.classList.add('hidden');
+  const type = (file.type || '').toLowerCase();
+  const name = (file.name || '').toLowerCase();
+  previewUrl = URL.createObjectURL(file);
+  if (type.startsWith('image/') || /\.(png|jpe?g)$/.test(name)) {
+    img.src = previewUrl;
+    img.classList.remove('hidden');
+  } else if (type === 'application/pdf' || name.endsWith('.pdf')) {
+    pdf.src = previewUrl;
+    pdf.classList.remove('hidden');
+  } else {
+    generic.classList.remove('hidden');
+  }
+  $('preview-name').textContent = file.name;
+  $('preview-size').textContent = `${(file.size / 1024).toFixed(0)} KB`;
+  $('file-preview').classList.remove('hidden');
+}
+
+function clearFile(silent) {
+  if (previewUrl) {
+    URL.revokeObjectURL(previewUrl);
+    previewUrl = null;
+  }
+  selectedFile = null;
+  if (fileInput) fileInput.value = '';
+  $('file-label').textContent = '点击或拖拽文件到此处';
+  const preview = $('file-preview');
+  if (preview) preview.classList.add('hidden');
+  $('preview-img').src = '';
+  $('preview-pdf').src = '';
+  if (!silent) setMsg('已移除，请重新选择文件', true);
 }
 
 // ---------------- 提交打印 ----------------
@@ -142,6 +186,7 @@ $('print-form').addEventListener('submit', async (e) => {
   const form = new FormData();
   form.append('file', selectedFile);
   form.append('copies', $('opt-copies').value);
+  form.append('pages', $('opt-pages').value);
   form.append('color', $('opt-color').value);
   form.append('paperSize', $('opt-paper').value);
   form.append('printer', $('opt-printer').value);
@@ -152,9 +197,7 @@ $('print-form').addEventListener('submit', async (e) => {
     const data = await api('/api/print', { method: 'POST', body: form });
     renderQuota(data.quota);
     setMsg('已提交，正在排队打印', true);
-    selectedFile = null;
-    fileInput.value = '';
-    $('file-label').textContent = '点击或拖拽文件到此处';
+    clearFile(true);
     refreshTasks();
   } catch (err) {
     if (err.data && err.data.quota) renderQuota(err.data.quota);
@@ -230,21 +273,25 @@ function renderTasks(tasks) {
   tasks.forEach((t) => {
     const tr = document.createElement('tr');
     const errorHint = t.status === 'failed' && t.error ? `<div class="params">${escapeHtml(t.error)}</div>` : '';
+    const pagesText = t.pages ? `第 ${escapeHtml(t.pages)} 页 · ` : '';
+    const action = t.status === 'processing'
+      ? '<span class="params">打印中…</span>'
+      : `<button class="btn ghost" data-delete="${t.id}">删除</button>`;
     tr.innerHTML = `
       <td><div class="filename" title="${escapeHtml(t.originalName)}">${escapeHtml(t.originalName)}</div></td>
-      <td class="params">${t.copies} 份 · ${t.color === 'color' ? '彩色' : '黑白'} · ${escapeHtml(t.paperSize)}</td>
+      <td class="params">${t.copies} 份 · ${pagesText}${t.color === 'color' ? '彩色' : '黑白'} · ${escapeHtml(t.paperSize)}</td>
       <td class="params">${escapeHtml(t.ownerName || '-')}</td>
       <td><span class="status ${t.status}">${STATUS_TEXT[t.status] || t.status}</span>${errorHint}</td>
       <td class="params">${formatTime(t.createdAt)}</td>
-      <td>${t.status === 'pending' ? `<div class="actions"><button class="ghost" data-cancel="${t.id}">取消</button></div>` : ''}</td>
+      <td><div class="actions">${action}</div></td>
     `;
     body.appendChild(tr);
   });
-  body.querySelectorAll('[data-cancel]').forEach((btn) => {
+  body.querySelectorAll('[data-delete]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       try {
-        const data = await api(`/api/tasks/${btn.dataset.cancel}`, { method: 'DELETE' });
-        if (data.quota) renderQuota(data.quota);
+        const data = await api(`/api/tasks/${btn.dataset.delete}`, { method: 'DELETE' });
+        if (data && data.quota) renderQuota(data.quota);
         refreshTasks();
       } catch (err) { alert(err.message); }
     });

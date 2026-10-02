@@ -39,6 +39,14 @@ function toInt(value, fallback, min, max) {
   return Math.min(Math.max(n, min), max);
 }
 
+/** 页码范围：仅允许数字、逗号、连字符，如 "1-3,5"；空表示全部 */
+function normalizePages(value) {
+  const s = String(value == null ? '' : value).replace(/\s+/g, '');
+  if (!s) return '';
+  if (!/^[0-9,-]{1,100}$/.test(s)) return '';
+  return s;
+}
+
 function currentQuota(req) {
   const q = identity.quotaIdentity(req);
   return { ...limiter.status(q.key, q.limit, q.windowHours), key: q.key, limit: q.limit, windowHours: q.windowHours };
@@ -75,6 +83,7 @@ router.post('/print', upload.single('file'), (req, res) => {
     size: req.file.size,
     kind: result.kind,
     copies: toInt(req.body.copies, 1, 1, 99),
+    pages: normalizePages(req.body.pages),
     color: req.body.color === 'color' ? 'color' : 'mono',
     paperSize,
     printer: (req.body.printer || '').toString().trim().slice(0, 120),
@@ -108,9 +117,9 @@ router.delete('/tasks/:id', (req, res) => {
   if (!task || !identity.canAccess(req, task)) {
     return res.status(404).json({ error: '任务不存在' });
   }
-  const result = queue.cancelTask(req.params.id);
+  const result = queue.removeTask(req.params.id);
   if (!result.ok) return res.status(400).json({ error: result.error });
-  return res.json({ task: result.task, quota: currentQuota(req) });
+  return res.json({ ok: true, quota: currentQuota(req) });
 });
 
 router.get('/printers', async (req, res) => {

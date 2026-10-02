@@ -190,6 +190,22 @@ function cancelTask(id) {
   return { ok: true, task: publicTask(task) };
 }
 
+/** 删除任务记录（等待中的任务会先退还配额；打印中的不可删除） */
+function removeTask(id) {
+  const idx = tasks.findIndex((t) => t.id === id);
+  if (idx === -1) return { ok: false, error: '任务不存在' };
+  const task = tasks[idx];
+  if (task.status === 'processing') return { ok: false, error: '任务正在打印，暂不能删除' };
+  if (task.status === 'pending') {
+    addLog(task, 'warn', '任务已删除，已退还配额');
+    refundQuota(task);
+  }
+  cleanupFile(task);
+  tasks.splice(idx, 1);
+  save();
+  return { ok: true };
+}
+
 module.exports = {
   load,
   createTask,
@@ -197,5 +213,6 @@ module.exports = {
   listTasks,
   getTask,
   cancelTask,
+  removeTask,
   publicTask,
 };

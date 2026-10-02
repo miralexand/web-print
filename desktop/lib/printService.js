@@ -55,6 +55,12 @@ function decodeFilename(name) {
   }
 }
 
+function normalizePages(value) {
+  const s = String(value == null ? '' : value).replace(/\s+/g, '');
+  if (!s) return '';
+  return /^[0-9,-]{1,100}$/.test(s) ? s : '';
+}
+
 // 通过 Office / WPS 的 COM 自动化转 PDF（Windows 专用）
 // 注意：部分环境（如 WPS 接管）在关闭 COM 时会抛 RPC 错误，但 PDF 已生成，
 // 因此以“输出文件是否存在”为成功判据，忽略 Quit/Close 的异常。
@@ -288,6 +294,7 @@ class PrintService {
       const originalName = decodeFilename(req.file.originalname || '');
       const ext = path.extname(originalName).toLowerCase();
       const copies = Math.min(Math.max(Number.parseInt(req.body.copies, 10) || 1, 1), 99);
+      const pages = normalizePages(req.body.pages);
       const color = req.body.color === 'color' ? 'color' : 'mono';
       const paperSize = (req.body.paperSize || '').trim();
       const printer = (req.body.printer || '').trim();
@@ -299,6 +306,7 @@ class PrintService {
           pdfPath = convertedPath;
         }
         const options = { copies };
+        if (pages) options.pages = pages;
         if (printer) options.printer = printer;
         if (color === 'mono') options.monochrome = true;
         if (paperSize) options.paperSize = paperSize;

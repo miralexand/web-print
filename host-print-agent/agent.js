@@ -71,6 +71,12 @@ function decodeFilename(name) {
   }
 }
 
+function normalizePages(value) {
+  const s = String(value == null ? '' : value).replace(/\s+/g, '');
+  if (!s) return '';
+  return /^[0-9,-]{1,100}$/.test(s) ? s : '';
+}
+
 function log(...args) {
   console.log(`[${new Date().toISOString()}]`, ...args);
 }
@@ -258,6 +264,7 @@ router.post('/print', upload.single('file'), async (req, res) => {
   const originalName = decodeFilename(req.file.originalname || '');
   const ext = path.extname(originalName).toLowerCase();
   const copies = Math.min(Math.max(Number.parseInt(req.body.copies, 10) || 1, 1), 99);
+  const pages = normalizePages(req.body.pages);
   const color = req.body.color === 'color' ? 'color' : 'mono';
   const paperSize = (req.body.paperSize || '').trim();
   const printer = (req.body.printer || '').trim();
@@ -271,6 +278,7 @@ router.post('/print', upload.single('file'), async (req, res) => {
     }
 
     const options = { copies };
+    if (pages) options.pages = pages;
     if (printer) options.printer = printer;
     if (color === 'mono') options.monochrome = true;
     if (paperSize) options.paperSize = paperSize;

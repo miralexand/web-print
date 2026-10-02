@@ -61,8 +61,25 @@
             </div>
           </div>
 
+          <div id="file-preview" class="file-preview hidden">
+            <div class="preview-frame">
+              <img id="preview-img" class="preview-img hidden" alt="预览" />
+              <iframe id="preview-pdf" class="preview-pdf hidden" title="预览"></iframe>
+              <div id="preview-generic" class="preview-generic hidden">
+                <div class="preview-generic-icon">📄</div>
+                <div class="hint">该格式无法直接预览，提交后将自动转换为 PDF 后打印</div>
+              </div>
+            </div>
+            <div class="preview-meta">
+              <div class="preview-name" id="preview-name"></div>
+              <div class="hint" id="preview-size"></div>
+              <button type="button" id="clear-file-btn" class="btn ghost">移除并重选</button>
+            </div>
+          </div>
+
           <div class="options">
             <label>份数<input id="opt-copies" type="number" min="1" max="99" value="1" /></label>
+            <label>页码<input id="opt-pages" type="text" placeholder="全部，如 1-3,5" /></label>
             <label>色彩
               <select id="opt-color">
                 <option value="mono">黑白</option>

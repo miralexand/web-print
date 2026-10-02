@@ -33,11 +33,15 @@ jobs:
         run: npm run vendor
 
       - name: 配置代码签名（可选，提供证书 Secrets 时启用）
-        if: ${{ secrets.WINDOWS_CSC_LINK != '' }}
         shell: pwsh
         run: |
-          "CSC_LINK=${{ secrets.WINDOWS_CSC_LINK }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "CSC_KEY_PASSWORD=${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          if ('${{ secrets.WINDOWS_CSC_LINK }}') {
+            "CSC_LINK=${{ secrets.WINDOWS_CSC_LINK }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "CSC_KEY_PASSWORD=${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host '已启用代码签名'
+          } else {
+            Write-Host '未配置签名证书，跳过代码签名'
+          }
 
       - name: 构建安装包与绿色版
         run: npm run dist

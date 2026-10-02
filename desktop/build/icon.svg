@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="WebPrint">
+  <defs>
+    <linearGradient id="wpbg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5aa9ff"/>
+      <stop offset="1" stop-color="#0071e3"/>
+    </linearGradient>
+    <linearGradient id="wpsheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.45"/>
+      <stop offset="0.45" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="wpsoft" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#0b2b52" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect x="28" y="28" width="456" height="456" rx="116" fill="url(#wpbg)"/>
+  <rect x="28" y="28" width="456" height="456" rx="116" fill="url(#wpsheen)"/>
+  <g filter="url(#wpsoft)">
+    <rect x="188" y="112" width="136" height="132" rx="16" fill="#eef4fb"/>
+    <rect x="108" y="206" width="296" height="150" rx="30" fill="#ffffff"/>
+    <rect x="150" y="244" width="212" height="34" rx="17" fill="#dfeafb"/>
+    <rect x="188" y="322" width="136" height="128" rx="16" fill="#ffffff"/>
+    <rect x="212" y="352" width="88" height="12" rx="6" fill="#c7d8ee"/>
+    <rect x="212" y="378" width="88" height="12" rx="6" fill="#c7d8ee"/>
+  </g>
+  <circle cx="352" cy="312" r="13" fill="#34c759"/>
+</svg>

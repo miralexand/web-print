@@ -152,7 +152,7 @@ body {
   max-width: 620px; background: var(--card); border-radius: 26px; padding: 36px 30px;
   text-align: center; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 14px 40px rgba(0, 0, 0, 0.06);
 }
-.about-icon { width: 88px; height: 88px; border-radius: 20px; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12); }
+.about-icon { width: 88px; height: 88px; border-radius: 20px; }
 .about-name { margin-top: 16px; font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
 .about-version { margin-top: 4px; color: var(--muted); font-size: 13px; }
 .about-desc { max-width: 520px; margin: 16px auto 0; color: #3a3a3c; font-size: 13px; line-height: 1.75; }

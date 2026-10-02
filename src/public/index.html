@@ -4,13 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Web 打印服务</title>
+  <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+  <link rel="apple-touch-icon" href="/icon.svg" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <!-- 登录弹窗 -->
   <div id="login-modal" class="modal hidden">
     <form id="login-form" class="modal-card">
-      <div class="modal-logo">🖨️</div>
+      <img class="modal-logo" src="/icon.svg" alt="" />
       <h1>登录</h1>
       <p class="subtitle">登录后可管理用户与查看全部任务</p>
       <label>账号<input id="login-user" type="text" autocomplete="username" required /></label>
@@ -26,7 +28,7 @@
   <div class="app-shell">
     <header class="topbar">
       <div class="brand">
-        <span class="brand-mark">🖨️</span>
+        <img class="brand-mark" src="/icon.svg" alt="" />
         <div class="brand-text">
           <span class="brand-name">Web 打印</span>
           <span class="brand-sub">WebPrint Service</span>

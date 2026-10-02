@@ -1,0 +1,20 @@
+{
+  "name": "web-print",
+  "version": "1.0.0",
+  "private": true,
+  "description": "网页版打印服务：登录鉴权、文件上传、打印参数、任务队列，运行在 Docker 中，打印交由 Windows 宿主机 Agent 执行。",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "node --watch src/app.js",
+    "check": "node --check src/app.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "express-session": "^1.18.1",
+    "multer": "^2.0.1"
+  }
+}

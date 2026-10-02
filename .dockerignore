@@ -1,0 +1,9 @@
+node_modules
+npm-debug.log
+logs
+tmp
+host-print-agent
+.git
+.gitignore
+.env
+*.md

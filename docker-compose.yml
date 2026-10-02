@@ -1,0 +1,23 @@
+services:
+  webprint:
+    build: .
+    image: web-print-service:latest
+    container_name: web-print-service
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./logs:/app/logs
+      - ./tmp:/app/tmp
+    environment:
+      - PORT=3000
+      - AUTH_USER=${AUTH_USER:-admin}
+      - AUTH_PASS=${AUTH_PASS:-admin123}
+      - SESSION_SECRET=${SESSION_SECRET:-please-change-this-secret}
+      - HOST_PRINT_API=${HOST_PRINT_API:-http://host.docker.internal:8081}
+      - HOST_PRINT_TOKEN=${HOST_PRINT_TOKEN:-}
+      - TMP_FOLDER=/app/tmp
+      - LOG_FOLDER=/app/logs
+      - MAX_FILE_SIZE=${MAX_FILE_SIZE:-20971520}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

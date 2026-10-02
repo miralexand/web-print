@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Web 打印服务</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <!-- 登录页 -->
+  <div id="login-view" class="login-wrap hidden">
+    <form id="login-form" class="login-card">
+      <h1>Web 打印</h1>
+      <p class="subtitle">请登录后使用</p>
+      <label>
+        账号
+        <input id="login-user" type="text" autocomplete="username" required />
+      </label>
+      <label>
+        密码
+        <input id="login-pass" type="password" autocomplete="current-password" required />
+      </label>
+      <button type="submit" class="primary">登录</button>
+      <div id="login-error" class="error"></div>
+    </form>
+  </div>
+
+  <!-- 主界面 -->
+  <div id="app-view" class="hidden">
+    <header class="topbar">
+      <div class="brand">🖨️ Web 打印服务</div>
+      <div class="top-right">
+        <span id="agent-status" class="badge">检测中…</span>
+        <span id="current-user" class="user"></span>
+        <button id="logout-btn" class="ghost">退出</button>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card">
+        <h2>新建打印任务</h2>
+        <form id="print-form">
+          <div class="dropzone" id="dropzone">
+            <input id="file-input" type="file" hidden
+              accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.ppt,.pptx" />
+            <div class="dropzone-inner">
+              <strong id="file-label">点击或拖拽文件到此处</strong>
+              <span class="hint">支持 PDF / 图片 / Word / Excel / PPT，单文件最大 20MB</span>
+            </div>
+          </div>
+
+          <div class="options">
+            <label>
+              份数
+              <input id="opt-copies" type="number" min="1" max="99" value="1" />
+            </label>
+            <label>
+              色彩
+              <select id="opt-color">
+                <option value="mono">黑白</option>
+                <option value="color">彩色</option>
+              </select>
+            </label>
+            <label>
+              纸张
+              <select id="opt-paper">
+                <option>A4</option>
+                <option>A3</option>
+                <option>A5</option>
+                <option>B5</option>
+                <option>Letter</option>
+                <option>Legal</option>
+              </select>
+            </label>
+            <label>
+              打印机
+              <select id="opt-printer">
+                <option value="">默认打印机</option>
+              </select>
+            </label>
+          </div>
+
+          <button type="submit" class="primary" id="submit-btn">提交打印</button>
+          <span id="print-msg" class="msg"></span>
+        </form>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>任务列表</h2>
+          <button id="refresh-btn" class="ghost">刷新</button>
+        </div>
+        <table class="tasks">
+          <thead>
+            <tr>
+              <th>文件</th>
+              <th>参数</th>
+              <th>状态</th>
+              <th>创建时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="task-body">
+            <tr><td colspan="5" class="empty">暂无任务</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+
+  <script src="/main.js"></script>
+</body>
+</html>

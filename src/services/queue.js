@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const config = require('../config');
 const logger = require('./logger');
 const hostPrint = require('./hostPrint');
+const limiter = require('./usageLimiter');
 
 const TASKS_FILE = () => path.join(config.logFolder, 'tasks.json');
 const MAX_TASKS = 500;
@@ -23,6 +24,14 @@ function addLog(task, level, message) {
   if (task.logs.length > 100) task.logs = task.logs.slice(-100);
 }
 
+function refundQuota(task) {
+  if (task._quotaKey && task._quotaToken) {
+    limiter.refund(task._quotaKey, task._quotaToken);
+    task._quotaKey = null;
+    task._quotaToken = null;
+  }
+}
+
 function load() {
   try {
     const file = TASKS_FILE();
@@ -30,12 +39,12 @@ function load() {
       const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
       if (Array.isArray(parsed)) {
         tasks = parsed;
-        // 重启后遗留的处理中任务标记为失败
         tasks.forEach((t) => {
           if (t.status === 'processing' || t.status === 'pending') {
             t.status = 'failed';
             t.error = '服务重启，任务中断';
-            addLog(t, 'error', '服务重启，任务中断');
+            addLog(t, 'error', '服务重启，任务中断，已退还配额');
+            refundQuota(t);
           }
         });
       }
@@ -100,7 +109,8 @@ async function runTask(task) {
   } catch (err) {
     task.status = 'failed';
     task.error = err.message;
-    addLog(task, 'error', `打印失败：${err.message}`);
+    addLog(task, 'error', `打印失败：${err.message}，已退还配额`);
+    refundQuota(task);
     logger.error(`任务 ${task.id} 打印失败`, err);
   } finally {
     task.finishedAt = now();
@@ -124,12 +134,13 @@ async function processQueue() {
 }
 
 function publicTask(task) {
-  const { _filePath, ...rest } = task;
+  const { _filePath, _quotaKey, _quotaToken, ...rest } = task;
   return rest;
 }
 
-function listTasks() {
-  return tasks.map(publicTask);
+function listTasks(predicate) {
+  const mapped = tasks.map(publicTask);
+  return typeof predicate === 'function' ? mapped.filter(predicate) : mapped;
 }
 
 function getTask(id) {
@@ -143,7 +154,8 @@ function cancelTask(id) {
   if (task.status !== 'pending') return { ok: false, error: '仅可取消等待中的任务' };
   task.status = 'canceled';
   task.finishedAt = now();
-  addLog(task, 'warn', '任务已被取消');
+  addLog(task, 'warn', '任务已被取消，已退还配额');
+  refundQuota(task);
   cleanupFile(task);
   save();
   return { ok: true, task: publicTask(task) };

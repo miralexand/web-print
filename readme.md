@@ -32,7 +32,7 @@ cd ..
 docker compose up -d --build
 ```
 
-打开 <http://127.0.0.1:3000>，用 `.env` 中的账号登录，上传文件即可打印。
+打开 <http://127.0.0.1:3000>。游客可直接打印（受配额限制）；用 `.env` 中的初始管理员账号登录后，可进入「用户管理」新增用户并调整配额。
 
 > 对外发布（可选）：运行 `cloudflared tunnel --url http://127.0.0.1:3000`，或按下方「部署」绑定自有域名。
 
@@ -47,13 +47,17 @@ curl http://127.0.0.1:8081/health       # 宿主机 Agent
 
 ## 特性
 
-- **登录鉴权**：账号密码登录、会话保持，拒绝匿名打印
+- **登录鉴权**：账号密码登录、会话保持，密码使用 `scrypt` 加盐哈希存储
+- **游客打印配额**：未登录用户默认每 **3 小时最多打印 5 次**（可配置），超过则拒绝
+- **用户管理**：管理员可新增 / 修改 / 停用 / 删除用户，设置角色与每人打印配额
 - **多格式上传**：PDF、图片（PNG/JPG）、Office（Word/Excel/PPT）
 - **打印参数**：份数（1–99）、黑白/彩色、纸张尺寸、指定打印机
 - **任务队列**：内存 + 磁盘持久化，顺序执行；任务状态实时可见、等待任务可取消
+- **配额退还**：任务失败、被取消或服务重启中断时自动退还配额次数
 - **任务日志**：`logs/tasks.json`（结构化记录）与 `logs/app.log`（运行日志）
 - **自动转换**：Office/图片由宿主机 LibreOffice 转 PDF 后打印
 - **安全校验**：后缀白名单 + 文件头（magic number）+ 大小限制，打印后自动清理临时文件
+- **登录防爆破**：同一 IP 在窗口内失败次数过多将临时锁定
 - **轻量部署**：Web 端基于 `node:20-alpine`，宿主机 Agent 仅监听本机
 
 ## 整体架构
@@ -76,7 +80,7 @@ Windows 打印服务 / 本地打印机
 
 | 模块 | 运行位置 | 职责 |
 | --- | --- | --- |
-| **Web 打印服务** (`src/`) | Docker 容器 | 登录鉴权、文件上传与校验、打印参数、任务队列、状态与日志、调用宿主机接口 |
+| **Web 打印服务** (`src/`) | Docker 容器 | 登录鉴权、游客配额、用户管理、文件上传与校验、打印参数、任务队列、状态与日志、调用宿主机接口 |
 | **打印 Agent** (`host-print-agent/`) | Windows 宿主机 | Office/图片转 PDF、调用 Windows 打印驱动、返回打印结果 |
 
 > **为什么需要宿主机 Agent？**
@@ -85,11 +89,11 @@ Windows 打印服务 / 本地打印机
 
 **一次打印的完整链路**
 
-1. 浏览器上传 PDF / 图片 / Office 文档
-2. Web 服务校验文件、写入临时目录、创建任务并进入队列
+1. 浏览器上传 PDF / 图片 / Office 文档（无需登录也可，受游客配额限制）
+2. Web 服务校验文件与配额、写入临时目录、创建任务并进入队列
 3. 队列顺序取出任务，将文件与参数 POST 给宿主机 `127.0.0.1:8081`
 4. 宿主机 Agent：Office/图片先用 LibreOffice 转 PDF，再调用打印机
-5. 结果回传，Web 服务更新任务状态并清理临时文件
+5. 结果回传，Web 服务更新任务状态并清理临时文件；失败/取消会退还配额
 
 ## 项目结构
 
@@ -101,16 +105,20 @@ web-print/
 ├── LICENSE                    # 木兰宽松许可证 第2版
 ├── package.json               # Web 服务依赖
 ├── src/                       # ===== Web 打印服务（容器内运行）=====
-│   ├── app.js                 # Express 入口：会话、静态资源、路由、错误处理
+│   ├── app.js                 # Express 入口：会话、静态资源、路由、错误处理、优雅退出
 │   ├── config.js              # 环境变量集中配置
-│   ├── middleware/auth.js     # 登录校验中间件
+│   ├── middleware/auth.js     # attachUser / requireAuth / requireAdmin
 │   ├── routes/
 │   │   ├── auth.js            # /api/login /api/logout /api/me
-│   │   └── print.js           # /api/print /api/tasks /api/printers /api/status
+│   │   ├── print.js           # /api/print /api/tasks /api/printers /api/status
+│   │   └── admin.js           # /api/admin/users /api/admin/usage
 │   ├── services/
 │   │   ├── fileValidator.js   # 文件类型 / 大小 / 文件头校验
 │   │   ├── hostPrint.js       # 调用宿主机打印 Agent
-│   │   ├── queue.js           # 打印任务队列 + 持久化
+│   │   ├── identity.js        # 请求身份识别与配额 key
+│   │   ├── queue.js           # 打印任务队列 + 持久化 + 配额退还
+│   │   ├── usageLimiter.js    # 配额限流（滚动窗口、持久化）
+│   │   ├── userStore.js       # 用户存储（scrypt 哈希、原子写入）
 │   │   └── logger.js          # 日志
 │   └── public/                # 前端网页（原生 HTML/CSS/JS）
 │       ├── index.html
@@ -120,6 +128,7 @@ web-print/
 │   ├── agent.js
 │   ├── package.json
 │   └── README.md
+├── data/                      # 用户库与用量数据（挂载进容器）
 ├── logs/                      # 任务记录与日志（挂载进容器）
 └── tmp/                       # 上传临时文件（打印后自动清理）
 ```
@@ -143,9 +152,15 @@ cp .env.example .env      # Windows: copy .env.example .env
 编辑 `.env`，至少修改登录账号密码与会话密钥：
 
 ```ini
+# 初始管理员（仅首次初始化用户库时生效）
 AUTH_USER=admin
 AUTH_PASS=your-strong-password
 SESSION_SECRET=某个随机长字符串
+
+# 游客配额：每 3 小时 5 次
+ANON_PRINT_LIMIT=5
+ANON_WINDOW_HOURS=3
+
 HOST_PRINT_API=http://host.docker.internal:8081
 HOST_PRINT_TOKEN=
 MAX_FILE_SIZE=20971520
@@ -173,7 +188,7 @@ docker compose up -d --build
 docker compose logs -f webprint
 ```
 
-本地访问 <http://127.0.0.1:3000>，用 `.env` 中的账号登录并测试上传打印。
+本地访问 <http://127.0.0.1:3000>，游客可直接打印；用 `.env` 中的初始管理员登录后可管理用户与配额。
 
 ### 4. 配置 Cloudflare Tunnel（可选，对外访问）
 
@@ -185,6 +200,24 @@ docker compose logs -f webprint
    - 可选开启 **Cloudflare Access** 做二次身份验证
 4. 外网访问：`https://print.yourdomain.com`
 
+## 用户与配额
+
+### 游客（未登录）
+
+- 无需登录即可上传打印，默认 **每 3 小时最多 5 次**（`ANON_PRINT_LIMIT` / `ANON_WINDOW_HOURS`）
+- 按客户端 IP 计数，超出后返回 `429`，页面会提示剩余等待时间
+- 任务失败、被取消或服务重启中断时，配额自动退还
+
+### 用户与管理员
+
+- 系统首次启动会自动创建初始管理员（来自 `AUTH_USER` / `AUTH_PASS`）
+- 管理员在网页右上角「用户管理」中可：
+  - 新增用户、修改用户名 / 密码 / 角色 / 状态
+  - 为每个用户单独设置打印配额（`0` 表示不限次数）与配额窗口
+  - 查看并重置游客 / IP 的用量记录
+- 系统始终保证至少保留一名启用状态的管理员，禁止删除或停用最后一名管理员
+- 用户被停用或删除后，其已登录会话立即失效
+
 ## 接口说明
 
 ### Web 服务（容器，端口 3000）
@@ -194,13 +227,26 @@ docker compose logs -f webprint
 | GET | `/health` | 否 | 健康检查 |
 | POST | `/api/login` | 否 | 登录，Body：`{ username, password }` |
 | POST | `/api/logout` | 否 | 退出登录 |
-| GET | `/api/me` | 否 | 获取当前登录用户 |
-| POST | `/api/print` | 是 | 上传并创建打印任务（multipart/form-data） |
-| GET | `/api/tasks` | 是 | 任务列表（最新在前） |
-| GET | `/api/tasks/:id` | 是 | 单个任务详情 |
-| DELETE | `/api/tasks/:id` | 是 | 取消等待中的任务 |
-| GET | `/api/printers` | 是 | 宿主机打印机列表（代理 Agent） |
-| GET | `/api/status` | 是 | 宿主机 Agent 在线状态 |
+| GET | `/api/me` | 否 | 当前身份与剩余配额（游客返回 `anonymous:true`） |
+| POST | `/api/print` | 否* | 上传并创建打印任务（multipart/form-data），受配额限制 |
+| GET | `/api/tasks` | 否* | 任务列表：管理员看全部，用户/游客看自己 |
+| GET | `/api/tasks/:id` | 否* | 单个任务详情（仅本人或管理员） |
+| DELETE | `/api/tasks/:id` | 否* | 取消等待中的任务（仅本人或管理员），退还配额 |
+| GET | `/api/printers` | 否 | 宿主机打印机列表（代理 Agent） |
+| GET | `/api/status` | 否 | 宿主机 Agent 在线状态 |
+
+> `否*` 表示无需登录即可访问，但未登录身份按 IP 计入游客配额，且只能访问自己 IP 的任务。
+
+管理员接口（需 `admin` 角色）：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/admin/users` | 用户列表 |
+| POST | `/api/admin/users` | 新增用户 `{ username, password, role, enabled, printQuota, quotaWindowHours }` |
+| PATCH | `/api/admin/users/:id` | 修改用户（字段同上，`password` 留空则不修改） |
+| DELETE | `/api/admin/users/:id` | 删除用户 |
+| GET | `/api/admin/usage` | 游客 / IP 用量快照 |
+| POST | `/api/admin/usage/reset` | 重置某来源用量 `{ key }` |
 
 `POST /api/print` 表单字段：
 
@@ -229,14 +275,21 @@ docker compose logs -f webprint
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `PORT` | `3000` | 监听端口 |
-| `AUTH_USER` | `admin` | 登录账号 |
-| `AUTH_PASS` | `admin123` | 登录密码（务必修改） |
+| `AUTH_USER` | `admin` | 初始管理员账号（仅首次初始化用户库时使用） |
+| `AUTH_PASS` | `admin123` | 初始管理员密码（务必修改） |
 | `SESSION_SECRET` | `please-change-this-secret` | 会话密钥（务必修改） |
+| `SESSION_HOURS` | `12` | 登录会话有效小时数 |
+| `ANON_PRINT_LIMIT` | `5` | 游客每窗口最多打印次数 |
+| `ANON_WINDOW_HOURS` | `3` | 游客配额窗口（小时） |
+| `LOGIN_MAX_ATTEMPTS` | `10` | 登录窗口内允许的失败次数 |
+| `LOGIN_WINDOW_MINUTES` | `15` | 登录失败统计窗口（分钟） |
+| `TRUST_PROXY` | `1` | 反向代理层数（本机直连设 `0`，Cloudflare Tunnel 保持 `1`） |
 | `HOST_PRINT_API` | `http://host.docker.internal:8081` | 宿主机 Agent 地址 |
 | `HOST_PRINT_TOKEN` | 空 | 与 Agent 约定的令牌 |
 | `HOST_PRINT_TIMEOUT` | `180000` | 调用 Agent 超时（毫秒） |
 | `TMP_FOLDER` | `/app/tmp` | 临时文件目录 |
 | `LOG_FOLDER` | `/app/logs` | 日志目录 |
+| `DATA_FOLDER` | `/app/data` | 用户库与用量数据目录 |
 | `MAX_FILE_SIZE` | `20971520`（20MB） | 单文件大小上限（字节） |
 
 ### 宿主机 Agent
@@ -251,26 +304,28 @@ docker compose logs -f webprint
 
 ## 安全建议
 
-1. Web 应用必须开启登录鉴权，禁止匿名外网打印
+1. 游客可匿名打印，但受配额限制（默认每 3 小时 5 次）；对外场景建议用 Cloudflare Access 再收一层
 2. 文件校验：后缀白名单 + 文件头校验 + MIME 类型，打印完成自动清理临时文件
-3. 宿主机打印 Agent 仅监听 `127.0.0.1`，禁止暴露外网；可加 `AGENT_TOKEN` 令牌
-4. 使用 Cloudflare Access 再加一层身份防护，双重保险
-5. 限制上传文件大小，防止超大文件攻击
-6. 容器内服务不挂载敏感系统目录；`.env` 与 `logs/`、`tmp/` 已加入 `.gitignore`
-7. 及时修改默认账号密码与 `SESSION_SECRET`
+3. 密码使用 `scrypt` 加盐哈希存储，登录失败次数超限会临时锁定该 IP
+4. 宿主机打印 Agent 仅监听 `127.0.0.1`，禁止暴露外网；可加 `AGENT_TOKEN` 令牌
+5. 使用 Cloudflare Access 再加一层身份防护，双重保险
+6. 限制上传文件大小，防止超大文件攻击
+7. 容器内服务不挂载敏感系统目录；`.env` 与 `data/`、`logs/`、`tmp/` 已加入 `.gitignore`
+8. 及时修改默认管理员密码与 `SESSION_SECRET`
 
 > 生产建议：默认使用 `express-session` 内存存储，重启会清空登录态；如需多实例或持久会话，可替换为 `connect-redis` 等存储。
 
 ## 测试流程
 
 1. 启动宿主机 Agent，访问 `http://127.0.0.1:8081/health` 确认在线
-2. 启动 Docker 服务，访问 `http://127.0.0.1:3000` 登录
-3. 上传 PDF 测试打印，确认默认打印机出纸
-4. 上传 Word / Excel / PPT，验证 LibreOffice 转 PDF 后正常打印
-5. 测试彩色/黑白、不同纸张、多份数参数
-6. 启动 cloudflared 隧道，内网其他设备访问域名测试
-7. 外网手机/电脑访问域名，提交打印任务
-8. 网页「任务列表」查看状态；必要时查看 `logs/tasks.json`、`logs/app.log`
+2. 启动 Docker 服务，访问 `http://127.0.0.1:3000`，以游客身份上传 PDF 测试打印
+3. 连续打印验证游客配额：第 6 次应被拒绝并提示等待时间
+4. 用初始管理员登录，进入「用户管理」新增用户并设置配额，验证其登录与限额
+5. 上传 Word / Excel / PPT，验证 LibreOffice 转 PDF 后正常打印
+6. 测试彩色/黑白、不同纸张、多份数参数
+7. 启动 cloudflared 隧道，内网其他设备访问域名测试
+8. 外网手机/电脑访问域名，提交打印任务
+9. 网页「任务列表」查看状态；必要时查看 `logs/tasks.json`、`logs/app.log`
 
 ## 故障排查
 
@@ -279,9 +334,11 @@ docker compose logs -f webprint
 | 页面提示「打印服务离线」 | Agent 是否运行；`127.0.0.1:8081/health` 是否可访问；`HOST_PRINT_API` 是否正确 |
 | 容器无法访问宿主机接口 | 确认 compose 中 `host.docker.internal` 与 `extra_hosts` 配置；Windows 防火墙放行 |
 | 上传成功但不打印 | 查看任务状态与错误信息；宿主机打印 API、打印机驱动是否正常 |
+| 游客提示达到上限 | 属正常配额限制；可调整 `ANON_PRINT_LIMIT`/`ANON_WINDOW_HOURS`，或在用户管理里重置用量 |
+| 登录提示尝试过于频繁 | 触发了登录防爆破，等待窗口结束或重启服务（`data/usage.json` 可清空） |
 | Office 文件转换失败 | 检查宿主机 LibreOffice 是否安装、`SOFFICE_PATH` 是否正确 |
 | Cloudflare 域名打不开 | cloudflared 进程是否运行；隧道是否指向 `127.0.0.1:3000`；缓存是否关闭 |
-| 登录后立刻掉线 | `SESSION_SECRET` 是否稳定；容器是否频繁重启 |
+| 登录后立刻掉线 | `SESSION_SECRET` 是否稳定；容器是否频繁重启；账号是否被停用 |
 
 ## 本地开发（不使用 Docker）
 
@@ -302,7 +359,6 @@ $env:AUTH_PASS="admin123"; npm start
 - 打印任务过期自动删除、历史清理
 - 邮件 / 企业微信通知打印状态
 - 打印页数统计与用量报表
-- 用户管理（多账号、角色权限）
 
 ## 开源协议
 

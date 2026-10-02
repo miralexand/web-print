@@ -2,6 +2,7 @@ node_modules
 npm-debug.log
 logs
 tmp
+data
 host-print-agent
 .git
 .gitignore

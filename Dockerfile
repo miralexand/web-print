@@ -9,7 +9,7 @@ RUN npm install --omit=dev
 
 COPY src/ ./src/
 
-RUN mkdir -p /app/tmp /app/logs
+RUN mkdir -p /app/tmp /app/logs /app/data
 
 EXPOSE 3000
 

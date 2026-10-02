@@ -1,25 +1,42 @@
 'use strict';
 
-const crypto = require('crypto');
 const express = require('express');
 const config = require('../config');
+const userStore = require('../services/userStore');
+const limiter = require('../services/usageLimiter');
+const identity = require('../services/identity');
 
 const router = express.Router();
 
-function safeEqual(a, b) {
-  const ba = Buffer.from(String(a));
-  const bb = Buffer.from(String(b));
-  if (ba.length !== bb.length) return false;
-  return crypto.timingSafeEqual(ba, bb);
+function loginKey(req) {
+  return `login:${req.ip}`;
 }
 
 router.post('/login', (req, res) => {
   const { username, password } = req.body || {};
-  if (username && password && safeEqual(username, config.authUser) && safeEqual(password, config.authPass)) {
-    req.session.user = { username };
-    return res.json({ user: { username } });
+  const key = loginKey(req);
+
+  const attempts = limiter.status(key, config.loginMaxAttempts, config.loginWindowMinutes / 60);
+  if (!attempts.unlimited && !attempts.allowed) {
+    return res.status(429).json({
+      error: `尝试过于频繁，请于 ${new Date(attempts.resetAt).toLocaleTimeString('zh-CN')} 后重试`,
+    });
   }
-  return res.status(401).json({ error: '账号或密码错误' });
+
+  const user = userStore.findByUsername(username);
+  const valid = user && user.enabled !== false && userStore.verifyPassword(String(password || ''), user.passwordHash);
+  if (!valid) {
+    limiter.hit(key, config.loginMaxAttempts, config.loginWindowMinutes / 60);
+    return res.status(401).json({ error: '账号或密码错误' });
+  }
+
+  limiter.reset(key);
+  return req.session.regenerate((err) => {
+    if (err) return res.status(500).json({ error: '登录失败，请重试' });
+    req.session.userId = user.id;
+    userStore.touchLogin(user.id);
+    return res.json({ user: userStore.publicUser(user) });
+  });
 });
 
 router.post('/logout', (req, res) => {
@@ -27,10 +44,12 @@ router.post('/logout', (req, res) => {
 });
 
 router.get('/me', (req, res) => {
-  if (req.session && req.session.user) {
-    return res.json({ user: req.session.user });
-  }
-  return res.status(401).json({ error: '未登录' });
+  const quota = identity.quotaIdentity(req);
+  res.json({
+    user: req.user || null,
+    anonymous: !req.user,
+    quota: limiter.status(quota.key, quota.limit, quota.windowHours),
+  });
 });
 
 module.exports = router;

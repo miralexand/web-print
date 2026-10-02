@@ -343,6 +343,7 @@ function publicState() {
     token: config.token,
     basePath: config.agentBasePath || '',
     sofficePath: config.sofficePath || findSoffice(),
+    sofficeFound: service ? service.sofficeFound() : false,
     autoStart: config.autoStart,
     portable: !!process.env.PORTABLE_EXECUTABLE_DIR,
     dataDir: dataDir(),

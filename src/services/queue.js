@@ -14,6 +14,14 @@ const MAX_TASKS = 500;
 let tasks = [];
 let processing = false;
 let saveTimer = null;
+let retryTimer = null;
+const MAX_CONN_RETRIES = 5;
+
+function isConnectionError(err) {
+  if (!err) return false;
+  if (err.connection) return true;
+  return /无法连接|ECONNREFUSED|fetch failed|socket hang up|超时/i.test(err.message || '');
+}
 
 function now() {
   return new Date().toISOString();
@@ -106,16 +114,29 @@ async function runTask(task) {
     await hostPrint.submit(task);
     task.status = 'success';
     addLog(task, 'info', '打印任务已成功提交到打印机');
+    task.finishedAt = now();
+    cleanupFile(task);
+    save();
+    return false;
   } catch (err) {
+    // 本地打印服务尚未就绪：自动重试，避免“无法连接”直接把任务判失败
+    if (isConnectionError(err) && (task.retries || 0) < MAX_CONN_RETRIES) {
+      task.retries = (task.retries || 0) + 1;
+      task.status = 'pending';
+      task.startedAt = null;
+      addLog(task, 'warn', `本地打印服务未就绪，10 秒后自动重试（第 ${task.retries}/${MAX_CONN_RETRIES} 次）`);
+      save();
+      return true;
+    }
     task.status = 'failed';
     task.error = err.message;
     addLog(task, 'error', `打印失败：${err.message}，已退还配额`);
     refundQuota(task);
     logger.error(`任务 ${task.id} 打印失败`, err);
-  } finally {
     task.finishedAt = now();
     cleanupFile(task);
     save();
+    return false;
   }
 }
 
@@ -126,7 +147,15 @@ async function processQueue() {
     for (;;) {
       const task = [...tasks].reverse().find((t) => t.status === 'pending');
       if (!task) break;
-      await runTask(task);
+      const needRetry = await runTask(task);
+      if (needRetry) {
+        clearTimeout(retryTimer);
+        retryTimer = setTimeout(() => {
+          retryTimer = null;
+          processQueue();
+        }, 10000);
+        break;
+      }
     }
   } finally {
     processing = false;

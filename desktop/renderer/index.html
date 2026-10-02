@@ -237,10 +237,16 @@
                 <el-input v-model="serviceForm.agentBasePath" placeholder="如 /agent，留空则仅根路径" />
                 <div class="hint">用于通过 Cloudflare 隧道以「域名 + 路径」暴露 8081：Public Hostname 的 Path 填 <span class="kbd">/agent</span>，Service 填 <span class="kbd">http://127.0.0.1:8081</span>，此处也填 <span class="kbd">/agent</span>；并请务必设置访问令牌。</div>
               </el-form-item>
-              <el-form-item label="LibreOffice">
+              <el-form-item label="Document 转换">
                 <div class="input-row">
-                  <el-input v-model="serviceForm.sofficePath" placeholder="留空自动探测" />
+                  <el-input v-model="serviceForm.sofficePath" placeholder="LibreOffice 路径（留空自动探测）" />
                   <el-button @click="pickSoffice">浏览</el-button>
+                </div>
+                <div class="hint">
+                  Word/Excel/PPT 转 PDF：优先用 LibreOffice；未安装时自动回退到本机 Microsoft Office / WPS。
+                  当前：
+                  <el-tag v-if="state.sofficeFound" type="success" size="small" effect="plain">已检测到 LibreOffice</el-tag>
+                  <el-tag v-else type="warning" size="small" effect="plain">未检测到 LibreOffice（将用 Office/WPS）</el-tag>
                 </div>
               </el-form-item>
               <el-form-item label="开机自动启动"><el-switch v-model="serviceForm.autoStart" /></el-form-item>

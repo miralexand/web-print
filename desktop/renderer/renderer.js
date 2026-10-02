@@ -23,6 +23,7 @@ const app = createApp({
       port: 8081,
       token: '',
       sofficePath: '',
+      sofficeFound: false,
       autoStart: false,
       portable: false,
       dataDir: '',
@@ -78,6 +79,7 @@ const app = createApp({
       state.port = s.port;
       state.token = s.token;
       state.sofficePath = s.sofficePath;
+      state.sofficeFound = !!s.sofficeFound;
       state.autoStart = s.autoStart;
       state.portable = s.portable;
       state.dataDir = s.dataDir;

@@ -3,10 +3,9 @@
 /**
  * Windows 宿主机打印 Agent（命令行版）
  * ------------------------------------------------------------
- * 职责：
- *   1. 接收 Web 服务 POST 过来的待打印文件
- *   2. Office / 图片用本机 LibreOffice 转成 PDF（使用独立用户配置目录，避免转换失败）
- *   3. 用 pdf-to-printer 调用 Windows 打印驱动，提交到指定 / 默认打印机
+ *  1. 接收 Web 服务 POST 过来的待打印文件
+ *  2. Office / 图片转 PDF：优先 LibreOffice，其次 Microsoft Office / WPS 的 COM 自动化
+ *  3. 用 pdf-to-printer 调用 Windows 打印驱动，提交到指定 / 默认打印机
  *
  * 默认仅监听 127.0.0.1。若需通过 Cloudflare 隧道以“域名 + 路径”暴露，
  * 可设置 AGENT_BASE_PATH=/agent，并务必设置 AGENT_TOKEN 做鉴权。
@@ -28,6 +27,7 @@ const WORK_DIR = process.env.WORK_DIR || path.join(os.tmpdir(), 'webprint-agent'
 const UPLOAD_DIR = path.join(WORK_DIR, 'uploads');
 const CONVERT_DIR = path.join(WORK_DIR, 'converted');
 const SOFFICE = process.env.SOFFICE_PATH || findSoffice();
+const SOFFICE_FOUND = SOFFICE !== 'soffice' && fs.existsSync(SOFFICE);
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 fs.mkdirSync(CONVERT_DIR, { recursive: true });
@@ -101,9 +101,42 @@ function latestPdf(dir) {
   }
 }
 
-/** 使用独立用户配置目录将 Office / 图片转 PDF，失败自动重试一次 */
-function convertToPdf(filePath) {
-  const expected = path.join(CONVERT_DIR, path.basename(filePath).replace(/\.[^.]+$/, '') + '.pdf');
+const COM_SCRIPT = `
+$ErrorActionPreference = 'Stop'
+function New-App([string[]]$names) {
+  foreach ($n in $names) { try { return New-Object -ComObject $n } catch { } }
+  throw ("no COM app: " + ($names -join ', '))
+}
+function Quiet([scriptblock]$block) { try { & $block } catch { } }
+$in = $env:CONV_IN
+$out = $env:CONV_OUT
+$ext = $env:CONV_EXT
+try {
+  if ($ext -eq '.xls' -or $ext -eq '.xlsx' -or $ext -eq '.csv') {
+    $app = New-App @('Excel.Application','KET.Application')
+    $app.Visible = $false; $app.DisplayAlerts = $false
+    $wb = $app.Workbooks.Open($in, 0, $true)
+    $wb.ExportAsFixedFormat(0, $out)
+    Quiet { $wb.Close($false) }; Quiet { $app.Quit() }
+  } elseif ($ext -eq '.ppt' -or $ext -eq '.pptx') {
+    $app = New-App @('PowerPoint.Application','KWPP.Application')
+    $pres = $app.Presentations.Open($in, $true, $false, $false)
+    $pres.SaveAs($out, 32)
+    Quiet { $pres.Close() }; Quiet { $app.Quit() }
+  } else {
+    $app = New-App @('Word.Application','KWPS.Application')
+    $app.Visible = $false; $app.DisplayAlerts = 0
+    $doc = $app.Documents.Open($in, $false, $true)
+    $doc.ExportAsFixedFormat($out, 17)
+    Quiet { $doc.Close($false) }; Quiet { $app.Quit() }
+  }
+} catch {
+  if (-not (Test-Path $out)) { Write-Error $_; exit 1 }
+}
+if (Test-Path $out) { exit 0 } else { Write-Error 'no output'; exit 1 }
+`;
+
+function convertWithLibreOffice(filePath, expected) {
   const profileDir = path.join(WORK_DIR, `lo-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const profileUri = `file:///${profileDir.replace(/\\/g, '/')}`;
   const args = [
@@ -116,7 +149,6 @@ function convertToPdf(filePath) {
       resolve({ err, output: `${stdout || ''}${stderr || ''}`.trim() });
     });
   });
-
   return (async () => {
     fs.mkdirSync(profileDir, { recursive: true });
     try {
@@ -130,11 +162,50 @@ function convertToPdf(filePath) {
       if (!result.err && fs.existsSync(expected)) return expected;
       const found = latestPdf(CONVERT_DIR);
       if (found) return found;
-      throw new Error(`LibreOffice 转换失败：${result.output || (result.err && result.err.message) || '请检查 SOFFICE_PATH'}`);
+      throw new Error(result.output || (result.err && result.err.message) || 'LibreOffice 未生成 PDF');
     } finally {
       cleanup(profileDir);
     }
   })();
+}
+
+function convertWithCom(filePath, expected) {
+  const ext = path.extname(filePath).toLowerCase();
+  return new Promise((resolve, reject) => {
+    if (process.platform !== 'win32') return reject(new Error('COM 转换仅支持 Windows'));
+    const env = { ...process.env, CONV_IN: filePath, CONV_OUT: expected, CONV_EXT: ext };
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-Command', COM_SCRIPT],
+      { timeout: 180000, windowsHide: true, maxBuffer: 16 * 1024 * 1024, env },
+      (err, stdout, stderr) => {
+        const output = `${stdout || ''}${stderr || ''}`.trim();
+        if (fs.existsSync(expected)) return resolve(expected);
+        return reject(new Error(output || (err && err.message) || 'Office/WPS 未生成 PDF'));
+      }
+    );
+  });
+}
+
+async function convertToPdf(filePath) {
+  fs.mkdirSync(CONVERT_DIR, { recursive: true });
+  const expected = path.join(CONVERT_DIR, path.basename(filePath).replace(/\.[^.]+$/, '') + '.pdf');
+  const errors = [];
+  if (SOFFICE_FOUND) {
+    try {
+      return await convertWithLibreOffice(filePath, expected);
+    } catch (err) {
+      errors.push(`LibreOffice：${err.message}`);
+    }
+  } else {
+    errors.push('LibreOffice：未检测到 soffice');
+  }
+  try {
+    return await convertWithCom(filePath, expected);
+  } catch (err) {
+    errors.push(`Office/WPS：${err.message}`);
+  }
+  throw new Error(`文档转 PDF 失败。${errors.join('；')}。请安装 LibreOffice，或安装 Microsoft Office / WPS 后重试。`);
 }
 
 const storage = multer.diskStorage({
@@ -164,7 +235,7 @@ router.get('/health', async (req, res) => {
   } catch (_) {
     /* ignore */
   }
-  res.json({ ok: true, service: 'web-print-agent', basePath: BASE_PATH, soffice: SOFFICE, printers: printerCount });
+  res.json({ ok: true, service: 'web-print-agent', basePath: BASE_PATH, soffice: SOFFICE, sofficeFound: SOFFICE_FOUND, printers: printerCount });
 });
 
 router.get('/printers', async (req, res) => {
@@ -225,7 +296,7 @@ app.use((req, res) => res.status(404).json({ success: false, message: 'Not Found
 
 app.listen(PORT, HOST, () => {
   log(`打印 Agent 已启动：http://${HOST}:${PORT}${BASE_PATH}`);
-  log(`LibreOffice 路径：${SOFFICE}`);
+  log(`LibreOffice：${SOFFICE_FOUND ? SOFFICE : '未检测到，将使用 Office/WPS 转换'}`);
   if (!TOKEN) {
     log('提示：未设置 AGENT_TOKEN，接口未启用令牌校验（仅本机访问风险可控；若通过公网暴露请务必设置）');
   }

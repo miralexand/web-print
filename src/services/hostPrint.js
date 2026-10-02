@@ -67,9 +67,12 @@ async function submit(task) {
     return data;
   } catch (err) {
     if (err.name === 'AbortError') {
-      throw new Error('宿主机打印接口超时');
+      throw new Error(`本地打印服务响应超时（${config.hostPrintApi}）`);
     }
-    throw new Error(`无法连接宿主机打印接口（${config.hostPrintApi}）：${err.message}`);
+    const e = new Error(`无法连接本地打印服务（${config.hostPrintApi}）。请确认应用「概览」中的“打印服务”已启动；若刚启动请稍候重试。`);
+    e.connection = true;
+    e.cause = err;
+    throw e;
   } finally {
     clearTimeout(timer);
   }

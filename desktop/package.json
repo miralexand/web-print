@@ -1,15 +1,16 @@
 {
   "name": "web-print-tray",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
-  "description": "Windows 打印助手：内置本地打印服务，托盘常驻，可打包为 exe。",
+  "description": "Windows 打印助手：内置本地打印服务与 Cloudflare Tunnel 管理，托盘常驻，可打包为 exe。",
   "author": "miralexand",
   "license": "MulanPSL-2.0",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win nsis portable",
-    "pack": "electron-builder --win --dir"
+    "vendor": "node scripts/copy-vendor.js",
+    "dist": "electron-builder --win nsis portable --publish never",
+    "pack": "electron-builder --win --dir --publish never"
   },
   "dependencies": {
     "express": "^4.21.2",
@@ -18,7 +19,9 @@
   },
   "devDependencies": {
     "electron": "^31.7.7",
-    "electron-builder": "^24.13.3"
+    "electron-builder": "^24.13.3",
+    "element-plus": "^2.14.7",
+    "vue": "^3.5.43"
   },
   "build": {
     "appId": "com.miralexand.webprint.tray",

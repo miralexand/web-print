@@ -59,7 +59,7 @@ curl http://127.0.0.1:8081/health       # 宿主机 Agent
 - **自动转换**：Office/图片由宿主机 LibreOffice 转 PDF 后打印
 - **安全校验**：后缀白名单 + 文件头（magic number）+ 大小限制，打印后自动清理临时文件
 - **登录防爆破**：同一 IP 在窗口内失败次数过多将临时锁定
-- **托盘 exe**：宿主机侧可选图形化托盘应用，内置打印服务，可打包为安装包 / 免安装 exe
+- **托盘 exe**：宿主机侧可选图形化托盘应用（Vue3 + Element Plus），内置打印服务与 Cloudflare Tunnel 管理，可打包为安装包 / 免安装 exe
 - **轻量部署**：Web 端基于 `node:20-alpine`，宿主机 Agent 仅监听本机
 
 ## 整体架构
@@ -132,12 +132,16 @@ web-print/
 │   ├── package.json
 │   └── README.md
 ├── desktop/                   # ===== Windows 托盘应用（Electron，可打包 exe）=====
-│   ├── main.js                # 主进程：窗口、托盘、服务生命周期
-│   ├── preload.js             # 安全桥接
-│   ├── lib/printService.js    # 内置打印服务（与 Agent 等效）
-│   ├── renderer/              # 界面
-│   ├── scripts/make-icons.js  # 生成图标
+│   ├── main.js                # 主进程：窗口、托盘、服务与隧道生命周期
+│   ├── preload.js             # 安全桥接（contextBridge）
+│   ├── lib/
+│   │   ├── printService.js    # 内置打印服务（与 Agent 等效）
+│   │   └── cloudflared.js     # Cloudflare Tunnel 子进程管理
+│   ├── renderer/              # 界面（Vue3 + Element Plus）
+│   │   └── vendor/            # 本地化的 vue / element-plus 资源
+│   ├── scripts/               # make-icons.js / copy-vendor.js
 │   └── build/                 # 图标资源（icon.png / icon.ico / tray.png）
+├── .github/workflows/         # GitHub Actions：Windows 打包与 Release
 ├── data/                      # 用户库与用量数据（挂载进容器）
 ├── logs/                      # 任务记录与日志（挂载进容器）
 └── tmp/                       # 上传临时文件（打印后自动清理）
@@ -221,8 +225,14 @@ docker compose logs -f webprint
 - 一键启动 / 停止本地打印服务（默认 `127.0.0.1:8081`）
 - 实时显示服务状态、LibreOffice 路径、打印机列表与运行日志
 - 可修改监听端口、访问令牌、LibreOffice 路径，支持开机自启
-- 关闭窗口自动最小化到任务托盘；托盘菜单可显示界面 / 开关服务 / 打开 Web 界面 / 退出
+- **Cloudflare Tunnel 管理**：内置快速隧道（临时 `*.trycloudflare.com` 地址）与命名隧道（Token）两种模式，可启停、复制 / 打开公网地址、查看 cloudflared 日志，支持一键下载 cloudflared
+- 界面基于 **Vue 3 + Element Plus**（资源已本地化到 `renderer/vendor`，离线可用）
+- 关闭窗口自动最小化到任务托盘；托盘菜单可显示界面 / 开关服务 / 开关隧道 / 打开 Web 界面 / 退出
 - 可打包为 **NSIS 安装包** 与 **免安装 portable exe**
+
+**便携版（portable）说明**
+
+便携版的配置与数据保存在 exe 同目录的 `webprint-config.json`，随程序一起携带，不会写入用户目录；开机自启也会注册到 portable exe 本身，修复了旧版的配置不持久与自启失效问题。
 
 **开发运行**
 
@@ -246,9 +256,17 @@ npm run pack        # 仅生成免安装目录 release/win-unpacked/
 - `WebPrintTray Setup <版本>.exe`：NSIS 安装包（可选择安装目录、创建桌面快捷方式）
 - `WebPrintTray <版本>.exe`：免安装便携版，双击即用
 
-> 如需自定义图标，修改 `desktop/scripts/make-icons.js` 后执行 `node scripts/make-icons.js`，会重新生成 `build/` 下的 `icon.png`、`icon.ico`、`tray.png`。
+**GitHub Actions 自动构建**
 
-> Windows 上若打包时下载 Electron 出现证书错误，可先设置 `NODE_OPTIONS=--use-system-ca`，必要时配合镜像：`ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/`。
+`.github/workflows/build-desktop.yml` 会在以下情况自动构建 Windows 安装包与便携版：
+
+- 推送形如 `v*` 的标签（如 `v1.0.1`）：构建产物自动发布到对应的 GitHub Release
+- 手动触发（Actions → Build Windows Desktop → Run workflow）
+
+> 如需自定义图标，修改 `desktop/scripts/make-icons.js` 后执行 `node scripts/make-icons.js`，会重新生成 `build/` 下的 `icon.png`、`icon.ico`、`tray.png`。
+> 升级 Vue / Element Plus 后执行 `npm run vendor` 重新同步 `renderer/vendor` 资源。
+
+> Windows 上若本地打包时下载 Electron 出现证书错误，可先设置 `NODE_OPTIONS=--use-system-ca`，必要时配合镜像：`ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/`。
 
 ## 用户与配额
 

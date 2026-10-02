@@ -1,123 +1,257 @@
 'use strict';
 
-const $ = (id) => document.getElementById(id);
-let state = null;
-let busy = false;
+const { createApp, reactive, ref, computed, onMounted } = Vue;
+const { ElMessage } = ElementPlus;
 
-function render(s) {
-  state = s || state;
-  if (!state) return;
-  const running = !!state.running;
+const app = createApp({
+  setup() {
+    const tab = ref('overview');
+    const initialized = ref(false);
 
-  $('status-dot').className = `dot ${running ? 'on' : 'off'}`;
-  const badge = $('status-text');
-  badge.textContent = running ? '服务运行中' : '服务已停止';
-  badge.className = `badge ${running ? 'on' : 'off'}`;
+    const state = reactive({
+      running: false,
+      host: '127.0.0.1',
+      port: 8081,
+      token: '',
+      sofficePath: '',
+      autoStart: false,
+      portable: false,
+      dataDir: '',
+      logs: [],
+    });
 
-  $('addr').textContent = `http://${state.host}:${state.port}`;
-  $('info-running').textContent = running ? '运行中' : '已停止';
-  $('info-soffice').textContent = state.sofficePath || '未找到';
-  $('toggle-btn').textContent = running ? '停止服务' : '启动服务';
-  $('toggle-btn').className = running ? 'ghost' : 'primary';
+    const tunnel = reactive({
+      running: false,
+      url: '',
+      error: '',
+      logs: [],
+      mode: 'quick',
+      targetUrl: 'http://127.0.0.1:3000',
+      token: '',
+      cloudflaredPath: '',
+      resolvedPath: '',
+    });
 
-  if (document.activeElement !== $('cfg-port')) $('cfg-port').value = state.port;
-  if (document.activeElement !== $('cfg-token')) $('cfg-token').value = state.token || '';
-  if (document.activeElement !== $('cfg-soffice')) $('cfg-soffice').value = state.sofficePath || '';
-  $('cfg-autostart').checked = !!state.autoStart;
+    const printers = ref([]);
+    const busy = reactive({ service: false, printers: false, tunnel: false, download: false });
 
-  const logs = (state.logs || []).join('\n');
-  $('logs').textContent = logs || '暂无日志';
-  $('logs').scrollTop = $('logs').scrollHeight;
-}
+    const serviceForm = reactive({ port: 8081, token: '', sofficePath: '', autoStart: false });
+    const tunnelForm = reactive({ mode: 'quick', url: 'http://127.0.0.1:3000', token: '', cloudflaredPath: '', autoStart: false });
 
-async function refresh() {
-  render(await window.trayApi.getState());
-}
+    const serviceLogs = computed(() => (state.logs || []).join('\n'));
+    const tunnelLogs = computed(() => (tunnel.logs || []).join('\n'));
 
-async function loadPrinters() {
-  const body = $('printer-body');
-  body.innerHTML = '<tr><td colspan="2" class="empty">加载中…</td></tr>';
-  const res = await window.trayApi.getPrinters();
-  if (!res.ok) {
-    body.innerHTML = `<tr><td colspan="2" class="empty">${escapeHtml(res.error || '获取失败')}</td></tr>`;
-    $('info-printers').textContent = '0';
-    return;
-  }
-  const printers = res.printers || [];
-  $('info-printers').textContent = String(printers.length);
-  if (!printers.length) {
-    body.innerHTML = '<tr><td colspan="2" class="empty">未检测到打印机</td></tr>';
-    return;
-  }
-  body.innerHTML = '';
-  printers.forEach((p) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${escapeHtml(p.name || p.deviceId)}</td><td class="value small">${escapeHtml((p.paperSizes || []).slice(0, 4).join('、') || '-')}</td>`;
-    body.appendChild(tr);
-  });
-}
+    function initForms(s) {
+      serviceForm.port = s.port;
+      serviceForm.token = s.token || '';
+      serviceForm.sofficePath = s.sofficePath || '';
+      serviceForm.autoStart = !!s.autoStart;
+      if (s.cloudflare) {
+        tunnelForm.mode = s.cloudflare.mode || 'quick';
+        tunnelForm.url = s.cloudflare.targetUrl || 'http://127.0.0.1:3000';
+        tunnelForm.token = s.cloudflare.token || '';
+        tunnelForm.cloudflaredPath = s.cloudflare.cloudflaredPath || '';
+        tunnelForm.autoStart = !!s.cloudflare.autoStart;
+      }
+    }
 
-$('toggle-btn').addEventListener('click', async () => {
-  if (busy) return;
-  busy = true;
-  $('toggle-btn').disabled = true;
-  try {
-    const res = state && state.running ? await window.trayApi.stop() : await window.trayApi.start();
-    if (res && res.state) render(res.state);
-    else await refresh();
-    if (res && res.ok === false) setMsg(res.error, false);
-  } finally {
-    busy = false;
-    $('toggle-btn').disabled = false;
-  }
+    function syncState(s) {
+      if (!s) return;
+      state.running = s.running;
+      state.host = s.host;
+      state.port = s.port;
+      state.token = s.token;
+      state.sofficePath = s.sofficePath;
+      state.autoStart = s.autoStart;
+      state.portable = s.portable;
+      state.dataDir = s.dataDir;
+      state.logs = s.logs || [];
+      if (s.cloudflare) {
+        tunnel.running = s.cloudflare.running;
+        tunnel.url = s.cloudflare.url;
+        tunnel.error = s.cloudflare.error;
+        tunnel.logs = s.cloudflare.logs || [];
+        tunnel.mode = s.cloudflare.mode;
+        tunnel.targetUrl = s.cloudflare.targetUrl;
+        tunnel.token = s.cloudflare.token;
+        tunnel.cloudflaredPath = s.cloudflare.cloudflaredPath;
+        tunnel.resolvedPath = s.cloudflare.resolvedPath;
+      }
+      if (!initialized.value) {
+        initForms(s);
+        initialized.value = true;
+      }
+    }
+
+    async function refresh() {
+      syncState(await window.trayApi.getState());
+    }
+
+    async function refreshAll() {
+      await refresh();
+      await loadPrinters();
+    }
+
+    async function loadPrinters() {
+      busy.printers = true;
+      try {
+        const res = await window.trayApi.getPrinters();
+        printers.value = res.ok ? res.printers || [] : [];
+        if (!res.ok) ElMessage.error(res.error || '获取打印机失败');
+      } finally {
+        busy.printers = false;
+      }
+    }
+
+    async function toggleService() {
+      busy.service = true;
+      try {
+        const res = state.running ? await window.trayApi.stop() : await window.trayApi.start();
+        if (res && res.state) syncState(res.state);
+        if (res && res.ok === false) ElMessage.error(res.error);
+        else ElMessage.success(state.running ? '服务已启动' : '服务已停止');
+      } finally {
+        busy.service = false;
+      }
+    }
+
+    async function saveService() {
+      busy.service = true;
+      try {
+        const res = await window.trayApi.saveConfig({ ...serviceForm });
+        if (res.ok) {
+          syncState(res.state);
+          initialized.value = true;
+          ElMessage.success('设置已保存');
+        } else {
+          ElMessage.error(res.error || '保存失败');
+        }
+      } finally {
+        busy.service = false;
+      }
+    }
+
+    async function saveTunnel(start) {
+      busy.tunnel = true;
+      try {
+        if (start) {
+          await window.trayApi.tunnelStop();
+        }
+        const res = await window.trayApi.tunnelSave({ ...tunnelForm });
+        if (!res.ok) {
+          ElMessage.error(res.error || '保存失败');
+          return;
+        }
+        if (start) {
+          const started = await window.trayApi.tunnelStart();
+          if (started && started.state) syncState(started.state);
+          ElMessage.success('隧道已启动，正在获取公网地址…');
+        } else {
+          syncState(res.state);
+          ElMessage.success('隧道配置已保存');
+        }
+      } finally {
+        busy.tunnel = false;
+      }
+    }
+
+    async function stopTunnel() {
+      busy.tunnel = true;
+      try {
+        const res = await window.trayApi.tunnelStop();
+        if (res && res.state) syncState(res.state);
+        ElMessage.success('隧道已停止');
+      } finally {
+        busy.tunnel = false;
+      }
+    }
+
+    async function pickCloudflared() {
+      const res = await window.trayApi.tunnelPick();
+      if (res.ok) tunnelForm.cloudflaredPath = res.path;
+    }
+
+    async function pickSoffice() {
+      const res = await window.trayApi.pickSoffice();
+      if (res.ok) serviceForm.sofficePath = res.path;
+    }
+
+    async function downloadCloudflared() {
+      busy.download = true;
+      ElMessage.info('开始下载 cloudflared…');
+      try {
+        const res = await window.trayApi.tunnelDownload();
+        if (res.ok) {
+          tunnelForm.cloudflaredPath = res.path;
+          if (res.state) syncState(res.state);
+          ElMessage.success('cloudflared 下载完成');
+        } else {
+          ElMessage.error(res.error || '下载失败');
+        }
+      } finally {
+        busy.download = false;
+      }
+    }
+
+    function openWeb() {
+      window.trayApi.openWeb();
+    }
+
+    function openDownloadPage() {
+      window.trayApi.tunnelOpenDownload();
+    }
+
+    function openExternal(url) {
+      window.trayApi.openExternal(url);
+    }
+
+    function hideToTray() {
+      window.trayApi.hide();
+    }
+
+    async function copyUrl() {
+      try {
+        await navigator.clipboard.writeText(tunnel.url);
+        ElMessage.success('已复制公网地址');
+      } catch (_) {
+        ElMessage.warning('复制失败，请手动选择');
+      }
+    }
+
+    onMounted(() => {
+      refreshAll();
+      window.trayApi.onStateChanged(syncState);
+      setInterval(refresh, 3000);
+    });
+
+    return {
+      tab,
+      state,
+      tunnel,
+      printers,
+      busy,
+      serviceForm,
+      tunnelForm,
+      serviceLogs,
+      tunnelLogs,
+      refresh,
+      refreshAll,
+      loadPrinters,
+      toggleService,
+      saveService,
+      saveTunnel,
+      stopTunnel,
+      pickCloudflared,
+      pickSoffice,
+      downloadCloudflared,
+      openWeb,
+      openDownloadPage,
+      openExternal,
+      hideToTray,
+      copyUrl,
+    };
+  },
 });
 
-$('refresh-btn').addEventListener('click', loadPrinters);
-$('open-web-btn').addEventListener('click', () => window.trayApi.openWeb());
-$('hide-btn').addEventListener('click', () => window.trayApi.hide());
-
-$('pick-soffice').addEventListener('click', async () => {
-  const res = await window.trayApi.pickSoffice();
-  if (res.ok) $('cfg-soffice').value = res.path;
-});
-
-$('config-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  setMsg('保存中…', true);
-  const res = await window.trayApi.saveConfig({
-    port: $('cfg-port').value,
-    token: $('cfg-token').value,
-    sofficePath: $('cfg-soffice').value,
-    autoStart: $('cfg-autostart').checked,
-  });
-  if (res.ok) {
-    render(res.state);
-    setMsg('设置已保存', true);
-  } else {
-    setMsg(res.error || '保存失败', false);
-  }
-});
-
-function setMsg(text, ok) {
-  const el = $('cfg-msg');
-  el.textContent = text;
-  el.className = `msg ${ok ? 'ok' : 'err'}`;
-  if (ok) setTimeout(() => { if (el.textContent === text) el.textContent = ''; }, 2500);
-}
-
-function escapeHtml(str) {
-  return String(str == null ? '' : str).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-  }[c]));
-}
-
-window.trayApi.onStateChanged(render);
-
-(async function init() {
-  await refresh();
-  loadPrinters();
-  setInterval(async () => {
-    const latest = await window.trayApi.getState();
-    render(latest);
-  }, 3000);
-})();
+app.use(ElementPlus);
+app.mount('#app');

@@ -1,20 +1,60 @@
-# web-print｜Web 打印服务（Docker + Cloudflare Tunnel + 宿主机打印 Agent）
+# web-print · Web 打印服务
 
-> 仓库地址：https://github.com/miralexand/web-print
-> 环境：电脑A 共享网络给电脑B，电脑B 位于 137 网段且可访问互联网。
-> 目标：打包 Docker 部署在电脑B；Cloudflare Tunnel 对外提供网页打印服务。
+[![License](https://img.shields.io/badge/license-MulanPSL--2.0-blue.svg)](./LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](https://nodejs.org)
+[![Docker](https://img.shields.io/badge/docker-compose-2496ED.svg?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
+
+> 一个可自托管的网页打印系统：浏览器上传文件 → Docker 服务排队 → Windows 宿主机调用打印机。配合 Cloudflare Tunnel 可安全地对外提供打印服务。
+
+- 仓库地址：<https://github.com/miralexand/web-print>
+- 开源协议：[木兰宽松许可证 第2版 (MulanPSL-2.0)](./LICENSE)
+
+---
+
+## 快速开始（TL;DR）
+
+> 前置：Windows 电脑已安装 Docker Desktop（WSL2）、Node.js 20+、LibreOffice，且本机可正常打印。
 
 ```bash
+# 1) 克隆并配置
 git clone https://github.com/miralexand/web-print.git
 cd web-print
+copy .env.example .env          # Linux/macOS 用 cp
+# 编辑 .env：修改 AUTH_USER / AUTH_PASS / SESSION_SECRET
+
+# 2) 启动宿主机打印 Agent（新开一个终端，在 Windows 上运行）
+cd host-print-agent
+npm install
+npm start                        # 监听 127.0.0.1:8081
+
+# 3) 回到项目根目录，启动 Web 服务（Docker）
+cd ..
+docker compose up -d --build
 ```
 
-一个可直接运行的网页打印系统，包含两部分：
+打开 <http://127.0.0.1:3000>，用 `.env` 中的账号登录，上传文件即可打印。
 
-| 模块 | 运行位置 | 职责 |
-| --- | --- | --- |
-| **Web 打印服务** (`src/`) | 电脑B 的 Docker 容器 | 登录鉴权、文件上传与校验、打印参数、任务队列、状态与日志、调用宿主机接口 |
-| **打印 Agent** (`host-print-agent/`) | 电脑B Windows 宿主机 | Office/图片转 PDF、调用 Windows 打印驱动、返回打印结果 |
+> 对外发布（可选）：运行 `cloudflared tunnel --url http://127.0.0.1:3000`，或按下方「部署」绑定自有域名。
+
+一分钟自检：
+
+```bash
+curl http://127.0.0.1:3000/health       # Web 服务
+curl http://127.0.0.1:8081/health       # 宿主机 Agent
+```
+
+---
+
+## 特性
+
+- **登录鉴权**：账号密码登录、会话保持，拒绝匿名打印
+- **多格式上传**：PDF、图片（PNG/JPG）、Office（Word/Excel/PPT）
+- **打印参数**：份数（1–99）、黑白/彩色、纸张尺寸、指定打印机
+- **任务队列**：内存 + 磁盘持久化，顺序执行；任务状态实时可见、等待任务可取消
+- **任务日志**：`logs/tasks.json`（结构化记录）与 `logs/app.log`（运行日志）
+- **自动转换**：Office/图片由宿主机 LibreOffice 转 PDF 后打印
+- **安全校验**：后缀白名单 + 文件头（magic number）+ 大小限制，打印后自动清理临时文件
+- **轻量部署**：Web 端基于 `node:20-alpine`，宿主机 Agent 仅监听本机
 
 ## 整体架构
 
@@ -22,7 +62,7 @@ cd web-print
 外网浏览器
    │ HTTPS
    ▼
-Cloudflare Tunnel（cloudflared 在电脑B）
+Cloudflare Tunnel（cloudflared 运行在电脑B）
    │ http://127.0.0.1:3000
    ▼
 Docker 容器：Web 打印服务（Node.js / Express）
@@ -34,43 +74,36 @@ Windows 宿主机：打印 Agent（Node.js）
 Windows 打印服务 / 本地打印机
 ```
 
+| 模块 | 运行位置 | 职责 |
+| --- | --- | --- |
+| **Web 打印服务** (`src/`) | Docker 容器 | 登录鉴权、文件上传与校验、打印参数、任务队列、状态与日志、调用宿主机接口 |
+| **打印 Agent** (`host-print-agent/`) | Windows 宿主机 | Office/图片转 PDF、调用 Windows 打印驱动、返回打印结果 |
+
 > **为什么需要宿主机 Agent？**
-> Windows 下 Docker 容器**无法直接访问宿主机打印机驱动**。因此容器只负责 Web 应用（接收文件、任务队列、网页前端），真正打印由宿主机上的小型本地 API 完成。
-> （若宿主机是 Linux，可改用容器内 CUPS；本场景电脑B 为 Windows，故采用 Agent 方案。）
+> Windows 下 Docker 容器**无法直接访问宿主机打印机驱动**，因此容器只负责 Web 应用，真正打印由宿主机上的小型本地 API 完成。
+> 若宿主机是 Linux，可改用容器内 CUPS；本场景宿主机为 Windows，故采用 Agent 方案。
 
 **一次打印的完整链路**
 
 1. 浏览器上传 PDF / 图片 / Office 文档
-2. 容器内 Web 服务校验文件、写入临时目录、创建任务并进入队列
+2. Web 服务校验文件、写入临时目录、创建任务并进入队列
 3. 队列顺序取出任务，将文件与参数 POST 给宿主机 `127.0.0.1:8081`
 4. 宿主机 Agent：Office/图片先用 LibreOffice 转 PDF，再调用打印机
-5. 打印结果回传，Web 服务更新任务状态并清理临时文件
+5. 结果回传，Web 服务更新任务状态并清理临时文件
 
-## 一、功能清单
-
-- 账号密码登录、会话保持、退出登录
-- 网页上传 PDF / 图片 / Word / Excel / PPT
-- 打印参数：份数（1–99）、黑白/彩色、纸张尺寸（A3/A4/A5/B5/Letter/Legal）、指定打印机
-- 内存 + 磁盘持久化的打印任务队列（顺序执行，重启后中断任务标记失败）
-- 任务状态：等待中 / 打印中 / 已完成 / 失败 / 已取消，支持取消等待中的任务
-- 任务日志（`logs/tasks.json` + `logs/app.log`）
-- Office/图片由宿主机 LibreOffice 自动转 PDF
-- 文件安全校验：后缀白名单 + 文件头（magic number）校验 + 大小限制，打印后自动清理临时文件
-- Cloudflare Tunnel 一键对外，本地服务仅监听本机 / 容器网络
-
-## 二、项目结构
+## 项目结构
 
 ```
 web-print/
 ├── Dockerfile                 # Web 服务镜像
 ├── docker-compose.yml         # 一键编排
 ├── .env.example               # 环境变量示例（复制为 .env）
+├── LICENSE                    # 木兰宽松许可证 第2版
 ├── package.json               # Web 服务依赖
 ├── src/                       # ===== Web 打印服务（容器内运行）=====
 │   ├── app.js                 # Express 入口：会话、静态资源、路由、错误处理
 │   ├── config.js              # 环境变量集中配置
-│   ├── middleware/
-│   │   └── auth.js            # 登录校验中间件
+│   ├── middleware/auth.js     # 登录校验中间件
 │   ├── routes/
 │   │   ├── auth.js            # /api/login /api/logout /api/me
 │   │   └── print.js           # /api/print /api/tasks /api/printers /api/status
@@ -91,16 +124,15 @@ web-print/
 └── tmp/                       # 上传临时文件（打印后自动清理）
 ```
 
-## 三、前置准备（电脑B Windows）
+## 部署
+
+### 0. 前置准备（Windows 宿主机）
 
 1. 安装 **Docker Desktop**，启用 WSL2
-2. 安装 **Node.js 20+**（用于运行宿主机打印 Agent）
+2. 安装 **Node.js 20+**（运行宿主机打印 Agent）
 3. 本地打印机驱动安装完成，Windows 里可正常打印
-4. 安装 **LibreOffice**（宿主机安装，用于 Office/图片转 PDF）
-5. 准备托管在 **Cloudflare** 的域名
-6. 下载 `cloudflared` 客户端
-
-## 四、快速开始
+4. 安装 **LibreOffice**（用于 Office/图片转 PDF）
+5. 准备托管在 **Cloudflare** 的域名，并下载 `cloudflared`（可选，用于对外）
 
 ### 1. 配置环境变量
 
@@ -119,42 +151,41 @@ HOST_PRINT_TOKEN=
 MAX_FILE_SIZE=20971520
 ```
 
-### 2. 启动宿主机打印 Agent（电脑B，Windows）
+### 2. 启动宿主机打印 Agent
 
 ```powershell
 cd host-print-agent
 npm install
-# 可选：令牌需与 Web 服务侧 HOST_PRINT_TOKEN 一致
+# 可选：令牌需与 Web 服务侧 HOST_PRINT_TOKEN 保持一致
 $env:AGENT_TOKEN=""
 # 如 LibreOffice 不在默认路径，手动指定：
 $env:SOFFICE_PATH="C:\Program Files\LibreOffice\program\soffice.exe"
 npm start
 ```
 
-看到 `打印 Agent 已启动：http://127.0.0.1:8081` 即成功。可用浏览器访问 `http://127.0.0.1:8081/printers` 检查打印机列表。
+看到 `打印 Agent 已启动：http://127.0.0.1:8081` 即成功。浏览器访问 <http://127.0.0.1:8081/printers> 可检查打印机列表。
 
-### 3. 构建并启动 Docker 容器（电脑B）
+### 3. 构建并启动 Web 服务
 
 ```bash
 # 在项目根目录
-docker compose build
-docker compose up -d
+docker compose up -d --build
 docker compose logs -f webprint
 ```
 
-本地访问 `http://127.0.0.1:3000`，用 `.env` 中的账号登录并测试上传打印。
+本地访问 <http://127.0.0.1:3000>，用 `.env` 中的账号登录并测试上传打印。
 
-### 4. 配置 Cloudflare Tunnel（电脑B）
+### 4. 配置 Cloudflare Tunnel（可选，对外访问）
 
 1. 运行 `cloudflared`，创建隧道并指向 `http://127.0.0.1:3000`
 2. 在 Cloudflare 后台绑定域名，例如 `print.yourdomain.com`
 3. Cloudflare 安全配置：
    - 强制 HTTPS
-   - 关闭缓存（Cache Rules 对打印域名 Bypass）
+   - 关闭缓存（对打印域名 Bypass Cache）
    - 可选开启 **Cloudflare Access** 做二次身份验证
 4. 外网访问：`https://print.yourdomain.com`
 
-## 五、接口说明
+## 接口说明
 
 ### Web 服务（容器，端口 3000）
 
@@ -189,9 +220,9 @@ docker compose logs -f webprint
 | GET | `/printers` | 本机打印机列表 |
 | POST | `/print` | 接收文件与参数，转换并打印 |
 
-请求头 `x-print-token` 需与 `AGENT_TOKEN` 一致（未设置则跳过校验）。详见 `host-print-agent/README.md`。
+请求头 `x-print-token` 需与 `AGENT_TOKEN` 一致（未设置则跳过校验）。详见 [`host-print-agent/README.md`](./host-print-agent/README.md)。
 
-## 六、环境变量
+## 环境变量
 
 ### Web 服务
 
@@ -208,18 +239,29 @@ docker compose logs -f webprint
 | `LOG_FOLDER` | `/app/logs` | 日志目录 |
 | `MAX_FILE_SIZE` | `20971520`（20MB） | 单文件大小上限（字节） |
 
-## 七、安全重点
+### 宿主机 Agent
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `PORT` | `8081` | 监听端口 |
+| `HOST` | `127.0.0.1` | 监听地址（保持本机） |
+| `AGENT_TOKEN` | 空 | 请求令牌，空则不校验 |
+| `SOFFICE_PATH` | 自动探测 | LibreOffice 可执行文件路径 |
+| `WORK_DIR` | 系统临时目录 | 上传/转换临时目录 |
+
+## 安全建议
 
 1. Web 应用必须开启登录鉴权，禁止匿名外网打印
 2. 文件校验：后缀白名单 + 文件头校验 + MIME 类型，打印完成自动清理临时文件
 3. 宿主机打印 Agent 仅监听 `127.0.0.1`，禁止暴露外网；可加 `AGENT_TOKEN` 令牌
-4. Cloudflare Access 可再加一层身份防护，双重保险
+4. 使用 Cloudflare Access 再加一层身份防护，双重保险
 5. 限制上传文件大小，防止超大文件攻击
 6. 容器内服务不挂载敏感系统目录；`.env` 与 `logs/`、`tmp/` 已加入 `.gitignore`
+7. 及时修改默认账号密码与 `SESSION_SECRET`
 
-> 生产建议：默认使用 `express-session` 的内存存储，重启会清空登录态；如需多实例或持久会话，可替换为 `connect-redis` 等存储。
+> 生产建议：默认使用 `express-session` 内存存储，重启会清空登录态；如需多实例或持久会话，可替换为 `connect-redis` 等存储。
 
-## 八、测试流程
+## 测试流程
 
 1. 启动宿主机 Agent，访问 `http://127.0.0.1:8081/health` 确认在线
 2. 启动 Docker 服务，访问 `http://127.0.0.1:3000` 登录
@@ -230,7 +272,7 @@ docker compose logs -f webprint
 7. 外网手机/电脑访问域名，提交打印任务
 8. 网页「任务列表」查看状态；必要时查看 `logs/tasks.json`、`logs/app.log`
 
-## 九、故障排查
+## 故障排查
 
 | 现象 | 排查方向 |
 | --- | --- |
@@ -241,7 +283,19 @@ docker compose logs -f webprint
 | Cloudflare 域名打不开 | cloudflared 进程是否运行；隧道是否指向 `127.0.0.1:3000`；缓存是否关闭 |
 | 登录后立刻掉线 | `SESSION_SECRET` 是否稳定；容器是否频繁重启 |
 
-## 十、可选扩展
+## 本地开发（不使用 Docker）
+
+```bash
+npm install
+# Linux/macOS
+AUTH_USER=admin AUTH_PASS=admin123 npm start
+# PowerShell
+$env:AUTH_PASS="admin123"; npm start
+```
+
+前端为原生静态文件，修改 `src/public/` 后刷新即可。宿主机 Agent 同理进入 `host-print-agent/` 运行 `npm start`。
+
+## 可选扩展
 
 - 打印任务审核：提交后管理员手动确认打印
 - 多打印机切换 / 按用户绑定默认打印机
@@ -250,11 +304,14 @@ docker compose logs -f webprint
 - 打印页数统计与用量报表
 - 用户管理（多账号、角色权限）
 
-## 十一、本地开发（不使用 Docker）
+## 开源协议
 
-```bash
-npm install
-AUTH_USER=admin AUTH_PASS=admin123 npm start   # PowerShell: $env:AUTH_PASS="admin123"; npm start
+本项目基于 [木兰宽松许可证 第2版 (MulanPSL-2.0)](./LICENSE) 开源。
+
 ```
-
-前端为原生静态文件，修改 `src/public/` 后刷新即可。宿主机 Agent 同理进入 `host-print-agent/` 运行 `npm start`。
+Copyright (c) 2026 miralexand
+web-print is licensed under Mulan PSL v2.
+You can use this software according to the terms and conditions of the Mulan PSL v2.
+You may obtain a copy of Mulan PSL v2 at:
+         http://license.coscl.org.cn/MulanPSL2
+```

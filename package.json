@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "网页版打印服务：登录鉴权、文件上传、打印参数、任务队列，运行在 Docker 中，打印交由 Windows 宿主机 Agent 执行。",
+  "license": "MulanPSL-2.0",
   "main": "src/app.js",
   "scripts": {
     "start": "node src/app.js",

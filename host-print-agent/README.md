@@ -17,6 +17,10 @@ $env:SOFFICE_PATH="C:\Program Files\LibreOffice\program\soffice.exe"
 npm start
 ```
 
+## 开源协议
+
+基于 [木兰宽松许可证 第2版 (MulanPSL-2.0)](../LICENSE) 开源。
+
 默认监听 `127.0.0.1:8081`，仅本机可访问，不要暴露到公网。
 
 ## 环境变量

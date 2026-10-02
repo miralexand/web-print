@@ -2,7 +2,7 @@
   "name": "web-print-host-agent",
   "version": "1.0.0",
   "private": true,
-  "description": "运行在 Windows 电脑B 上的本地打印 Agent：接收 Web 服务转发的文件，Office 转 PDF 后调用本机打印机。",
+  "description": "运行在 Windows 宿主机上的本地打印 Agent：接收 Web 服务转发的文件，Office 转 PDF 后调用本机打印机。",
   "license": "MulanPSL-2.0",
   "main": "agent.js",
   "scripts": {

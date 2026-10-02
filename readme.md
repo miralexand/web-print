@@ -62,7 +62,7 @@ curl http://127.0.0.1:8081/health       # 宿主机 Agent
 外网浏览器
    │ HTTPS
    ▼
-Cloudflare Tunnel（cloudflared 运行在电脑B）
+Cloudflare Tunnel（cloudflared 运行在宿主机）
    │ http://127.0.0.1:3000
    ▼
 Docker 容器：Web 打印服务（Node.js / Express）

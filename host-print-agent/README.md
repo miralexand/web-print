@@ -1,4 +1,4 @@
-# 宿主机打印 Agent（Windows 电脑B）
+# 宿主机打印 Agent（Windows）
 
 Docker 容器无法直接访问 Windows 打印机驱动，因此由这个仅监听本机的 Node 服务承担最后一步打印。
 

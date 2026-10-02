@@ -178,6 +178,21 @@ function clearFile(silent) {
   if (!silent) setMsg('已移除，请重新选择文件', true);
 }
 
+function buildPages() {
+  const from = String($('opt-page-from').value || '').trim();
+  const to = String($('opt-page-to').value || '').trim();
+  if (!from && !to) return '';
+  const f = Number.parseInt(from, 10);
+  const t = Number.parseInt(to, 10);
+  if (from && to) {
+    const a = Math.min(f, t);
+    const b = Math.max(f, t);
+    return `${a}-${b}`;
+  }
+  if (from) return String(f);
+  return `1-${t}`;
+}
+
 // ---------------- 提交打印 ----------------
 $('print-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -186,7 +201,7 @@ $('print-form').addEventListener('submit', async (e) => {
   const form = new FormData();
   form.append('file', selectedFile);
   form.append('copies', $('opt-copies').value);
-  form.append('pages', $('opt-pages').value);
+  form.append('pages', buildPages());
   form.append('color', $('opt-color').value);
   form.append('paperSize', $('opt-paper').value);
   form.append('printer', $('opt-printer').value);

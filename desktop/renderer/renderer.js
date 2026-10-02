@@ -28,7 +28,7 @@ const app = createApp({
       portable: false,
       dataDir: '',
       logs: [],
-      web: { running: false, host: '127.0.0.1', port: 3000, url: '', adminUser: 'admin' },
+      web: { running: false, host: '127.0.0.1', port: 3000, url: '', adminUser: 'admin', allowLan: false, lanUrls: [] },
       about: {},
     });
 
@@ -48,7 +48,7 @@ const app = createApp({
 
     const printers = ref([]);
     const busy = reactive({ service: false, web: false, printers: false, tunnel: false, download: false });
-    const serviceForm = reactive({ port: 8081, webPort: 3000, token: '', agentBasePath: '', sofficePath: '', autoStart: false });
+    const serviceForm = reactive({ port: 8081, webPort: 3000, allowLan: true, token: '', agentBasePath: '', sofficePath: '', autoStart: false });
     const tunnelForm = reactive({ mode: 'quick', url: 'http://127.0.0.1:3000', token: '', cloudflaredPath: '', autoStart: false });
 
     const serviceLogs = computed(() => (state.logs || []).join('\n'));
@@ -59,6 +59,7 @@ const app = createApp({
     function initForms(s) {
       serviceForm.port = s.port;
       serviceForm.webPort = s.web ? s.web.port : 3000;
+      serviceForm.allowLan = s.web ? !!s.web.allowLan : true;
       serviceForm.token = s.token || '';
       serviceForm.agentBasePath = s.basePath || '';
       serviceForm.sofficePath = s.sofficePath || '';

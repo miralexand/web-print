@@ -1,8 +1,10 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const { execFile } = require('child_process');
 const { app, BrowserWindow, Tray, Menu, ipcMain, shell, dialog, nativeImage, net } = require('electron');
 const { PrintService, findSoffice } = require('./lib/printService');
 const { CloudflaredManager, findCloudflared } = require('./lib/cloudflared');
@@ -23,7 +25,7 @@ let quitting = false;
 let config = {
   port: 8081,
   webPort: 3000,
-  webHost: '127.0.0.1',
+  allowLan: true,
   token: '',
   agentBasePath: '',
   webUser: 'admin',
@@ -167,8 +169,38 @@ async function startWeb() {
     webConfig.hostPrintApi = `http://127.0.0.1:${config.port}`;
     webConfig.hostPrintToken = config.token || '';
   }
-  await mod.start({ port: config.webPort, host: config.webHost });
+  const host = config.allowLan ? '0.0.0.0' : '127.0.0.1';
+  await mod.start({ port: config.webPort, host });
   webRunning = true;
+  if (config.allowLan) ensureFirewallRule(config.webPort);
+}
+
+/** 尽力而为地为端口放行防火墙（需要管理员权限，失败不影响运行） */
+function ensureFirewallRule(port) {
+  try {
+    execFile(
+      'netsh',
+      ['advfirewall', 'firewall', 'add', 'rule', `name=WebPrint Web ${port}`, 'dir=in', 'action=allow', 'protocol=TCP', `localport=${port}`],
+      { windowsHide: true, timeout: 10000 },
+      (err) => {
+        if (err) logLine(`防火墙放行未成功（可在具有管理员权限时手动放行端口 ${port}）：${err.message}`);
+        else logLine(`已为端口 ${port} 添加防火墙放行规则`);
+      }
+    );
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function lanAddresses() {
+  const result = [];
+  const nets = os.networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name] || []) {
+      if (net.family === 'IPv4' && !net.internal) result.push(net.address);
+    }
+  }
+  return result;
 }
 
 async function stopWeb() {
@@ -367,9 +399,11 @@ function publicState() {
     logs: service ? service.logs.slice(-60) : [],
     web: {
       running: webRunning,
-      host: config.webHost,
+      host: config.allowLan ? '0.0.0.0' : '127.0.0.1',
       port: config.webPort,
       url: webUrl(),
+      allowLan: !!config.allowLan,
+      lanUrls: (config.allowLan ? lanAddresses() : []).map((ip) => `http://${ip}:${config.webPort}`),
       adminUser: config.webUser,
     },
     cloudflare: cloudflared ? cloudflared.state() : null,
@@ -450,6 +484,7 @@ function registerIpc() {
     const wasWeb = webRunning;
     if (patch.port !== undefined) config.port = Number.parseInt(patch.port, 10) || 8081;
     if (patch.webPort !== undefined) config.webPort = Number.parseInt(patch.webPort, 10) || 3000;
+    if (patch.allowLan !== undefined) config.allowLan = !!patch.allowLan;
     if (patch.token !== undefined) config.token = String(patch.token || '');
     if (patch.agentBasePath !== undefined) config.agentBasePath = String(patch.agentBasePath || '').trim();
     if (patch.sofficePath !== undefined) config.sofficePath = String(patch.sofficePath || '');
@@ -591,7 +626,7 @@ if (!gotLock) {
     }
     try {
       await startWeb();
-      logLine(`Web 服务已启动：http://${config.webHost}:${config.webPort}`);
+      logLine(`Web 服务已启动：${config.allowLan ? '0.0.0.0' : '127.0.0.1'}:${config.webPort}${config.allowLan ? '（局域网可访问）' : ''}`);
     } catch (err) {
       logLine('Web 服务启动失败:', err && err.stack ? err.stack : err);
       dialog.showErrorBox('Web 服务启动失败', `${(err && err.message) || err}\n\n请在界面中修改 Web 端口后重试。`);

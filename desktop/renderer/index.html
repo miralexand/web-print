@@ -57,6 +57,9 @@
               <div class="stat-head"><span class="stat-name">Web 打印服务</span><span class="dot" :class="state.web.running ? 'on' : 'off'"></span></div>
               <div class="stat-value">{{ state.web.url }}</div>
               <div class="stat-desc">{{ state.web.running ? '网页界面可访问，可在此上传打印' : '未启动' }}</div>
+              <div v-if="state.web.running && state.web.lanUrls && state.web.lanUrls.length" class="stat-desc">
+                局域网：<span class="mono">{{ state.web.lanUrls.join('　') }}</span>
+              </div>
               <div class="stat-actions">
                 <el-button :type="state.web.running ? 'default' : 'primary'" size="small" @click="toggleWeb" :loading="busy.web">
                   {{ state.web.running ? '停止' : '启动' }}
@@ -229,6 +232,10 @@
           <div class="panel">
             <el-form label-width="130px" label-position="left">
               <el-form-item label="Web 端口"><el-input-number v-model="serviceForm.webPort" :min="1" :max="65535" controls-position="right" /></el-form-item>
+              <el-form-item label="局域网访问">
+                <el-switch v-model="serviceForm.allowLan" />
+                <div class="hint">开启后 Web 服务绑定 <span class="kbd">0.0.0.0</span>，同一局域网的手机/电脑可用 <span class="kbd">http://本机IP:端口</span> 访问；若无法访问，请在 Windows 防火墙放行该端口（首次监听时系统可能弹窗，选择“允许访问”）。</div>
+              </el-form-item>
               <el-form-item label="打印端口"><el-input-number v-model="serviceForm.port" :min="1" :max="65535" controls-position="right" /></el-form-item>
               <el-form-item label="访问令牌">
                 <el-input v-model="serviceForm.token" placeholder="Web 与打印服务之间的令牌（可留空）" />

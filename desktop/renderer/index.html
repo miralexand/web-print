@@ -119,6 +119,50 @@
         <section v-show="tab === 'tunnel'">
           <h1 class="page-title">Cloudflare 隧道</h1>
           <p class="page-sub">把本地 Web 服务发布到公网，无需公网 IP</p>
+
+          <div class="panel">
+            <div class="panel-head">
+              <span>傻瓜教程 · 手把手配置</span>
+              <el-button text size="small" @click="tutorialOpen = !tutorialOpen">{{ tutorialOpen ? '收起' : '展开' }}</el-button>
+            </div>
+            <div v-show="tutorialOpen" class="tutorial">
+              <div class="tut-card">
+                <div class="tut-title">方式一：快速隧道 <span class="tut-tag">30 秒上手</span></div>
+                <ol class="tut-steps">
+                  <li>确认「Web 打印服务」正在运行（概览页可见）。</li>
+                  <li>点下方「第 0 步」下载 cloudflared（已装可跳过）。</li>
+                  <li>「隧道模式」选 <span class="kbd">快速隧道</span>，目标地址保持 <span class="kbd">http://127.0.0.1:3000</span>。</li>
+                  <li>点 <span class="kbd">保存并启动</span>，几秒后出现 <span class="kbd">https://xxxx.trycloudflare.com</span> 公网地址。</li>
+                  <li>点「复制」把地址发给需要打印的人即可（地址每次重启会变化）。</li>
+                </ol>
+              </div>
+              <div class="tut-card">
+                <div class="tut-title">方式二：命名隧道（固定域名，推荐长期使用） <span class="tut-tag gray">需要域名</span></div>
+                <ol class="tut-steps">
+                  <li>注册/登录 Cloudflare，并按提示把域名接入 Cloudflare（修改域名 NS 服务器）。</li>
+                  <li>进入 <b>Zero Trust → Networks → Tunnels</b>，点 <span class="kbd">Create a tunnel</span>，类型选 <span class="kbd">Cloudflared</span>。</li>
+                  <li>给隧道起名并创建，复制页面给出的 <b>Tunnel Token</b>（一长串字符）。</li>
+                  <li>在该隧道的 <b>Public Hostname</b> 点 <span class="kbd">Add</span>：Subdomain 自定义（如 print），Domain 选你的域名，Type 选 <span class="kbd">HTTP</span>，URL 填 <span class="kbd">127.0.0.1:3000</span>。</li>
+                  <li>回到本应用：「隧道模式」选 <span class="kbd">命名隧道</span>，粘贴 Token，点 <span class="kbd">保存并启动</span>。</li>
+                  <li>浏览器访问 <span class="kbd">https://print.你的域名</span> 即可。</li>
+                </ol>
+              </div>
+              <div class="tut-card">
+                <div class="tut-title">安全建议与排错</div>
+                <ol class="tut-steps">
+                  <li>网页默认账号 <span class="kbd">admin / admin123</span>，请登录后尽快在「用户管理」中修改。</li>
+                  <li>可在 Cloudflare <b>Access</b> 中为域名添加邮箱验证等策略，多一层保护。</li>
+                  <li>打不开时先看下方「cloudflared 日志」，常见原因是端口不对或 cloudflared 路径错误。</li>
+                </ol>
+              </div>
+              <div class="tut-actions">
+                <el-button size="small" type="primary" @click="downloadCloudflared" :loading="busy.download">第 0 步：下载 cloudflared</el-button>
+                <el-button size="small" @click="copyText('http://127.0.0.1:' + state.web.port)">复制本地地址</el-button>
+                <el-button size="small" link type="primary" @click="openExternal(state.about.repo + '/blob/main/docs/cloudflare-tunnel.md')">查看图文文档</el-button>
+              </div>
+            </div>
+          </div>
+
           <div class="panel">
             <el-form label-width="120px" label-position="left">
               <el-form-item label="隧道模式">

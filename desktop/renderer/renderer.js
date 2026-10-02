@@ -7,6 +7,7 @@ const app = createApp({
   setup() {
     const tab = ref('overview');
     const initialized = ref(false);
+    const tutorialOpen = ref(false);
 
     const nav = [
       { key: 'overview', label: '概览', icon: '🌿' },
@@ -249,6 +250,15 @@ const app = createApp({
       }
     }
 
+    async function copyText(text) {
+      try {
+        await navigator.clipboard.writeText(text);
+        ElMessage.success('已复制');
+      } catch (_) {
+        ElMessage.warning('复制失败，请手动选择');
+      }
+    }
+
     onMounted(() => {
       refreshAll();
       window.trayApi.onStateChanged(syncState);
@@ -258,6 +268,7 @@ const app = createApp({
     return {
       tab,
       nav,
+      tutorialOpen,
       state,
       tunnel,
       printers,
@@ -285,6 +296,7 @@ const app = createApp({
       openExternal,
       hideToTray,
       copyUrl,
+      copyText,
     };
   },
 });

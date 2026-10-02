@@ -10,122 +10,142 @@
   <!-- 登录弹窗 -->
   <div id="login-modal" class="modal hidden">
     <form id="login-form" class="modal-card">
+      <div class="modal-logo">🖨️</div>
       <h1>登录</h1>
       <p class="subtitle">登录后可管理用户与查看全部任务</p>
       <label>账号<input id="login-user" type="text" autocomplete="username" required /></label>
       <label>密码<input id="login-pass" type="password" autocomplete="current-password" required /></label>
       <div id="login-error" class="error"></div>
       <div class="modal-actions">
-        <button type="button" id="cancel-login" class="ghost">关闭</button>
-        <button type="submit" class="primary">登录</button>
+        <button type="button" id="cancel-login" class="btn ghost">关闭</button>
+        <button type="submit" class="btn primary">登录</button>
       </div>
     </form>
   </div>
 
-  <header class="topbar">
-    <div class="brand">🖨️ Web 打印服务</div>
-    <div class="top-right">
-      <span id="agent-status" class="badge">检测中…</span>
-      <span id="quota-badge" class="badge">…</span>
-      <span id="current-user" class="user"></span>
-      <button id="login-btn" class="ghost">登录</button>
-      <button id="admin-btn" class="ghost hidden">用户管理</button>
-      <button id="logout-btn" class="ghost hidden">退出</button>
-    </div>
-  </header>
-
-  <main class="container">
-    <section class="card">
-      <div class="card-head">
-        <h2>新建打印任务</h2>
-        <span id="print-mode" class="hint"></span>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">🖨️</span>
+        <div class="brand-text">
+          <span class="brand-name">Web 打印</span>
+          <span class="brand-sub">WebPrint Service</span>
+        </div>
       </div>
-      <form id="print-form">
-        <div class="dropzone" id="dropzone">
-          <input id="file-input" type="file" hidden
-            accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.ppt,.pptx" />
-          <div class="dropzone-inner">
-            <strong id="file-label">点击或拖拽文件到此处</strong>
-            <span class="hint">支持 PDF / 图片 / Word / Excel / PPT，单文件最大 20MB</span>
+      <div class="top-right">
+        <span id="agent-status" class="badge">检测中…</span>
+        <span id="quota-badge" class="badge">…</span>
+        <span id="current-user" class="user"></span>
+        <button id="login-btn" class="btn ghost">登录</button>
+        <button id="admin-btn" class="btn ghost hidden">用户管理</button>
+        <button id="logout-btn" class="btn ghost hidden">退出</button>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="card">
+        <div class="card-head">
+          <div>
+            <h2>新建打印任务</h2>
+            <p class="card-sub" id="print-mode"></p>
           </div>
         </div>
+        <form id="print-form">
+          <div class="dropzone" id="dropzone">
+            <input id="file-input" type="file" hidden
+              accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.ppt,.pptx" />
+            <div class="dropzone-inner">
+              <div class="dropzone-icon">⬆︎</div>
+              <strong id="file-label">点击或拖拽文件到此处</strong>
+              <span class="hint">支持 PDF / 图片 / Word / Excel / PPT，单文件最大 20MB</span>
+            </div>
+          </div>
 
-        <div class="options">
-          <label>份数<input id="opt-copies" type="number" min="1" max="99" value="1" /></label>
-          <label>色彩
-            <select id="opt-color">
-              <option value="mono">黑白</option>
-              <option value="color">彩色</option>
-            </select>
-          </label>
-          <label>纸张
-            <select id="opt-paper">
-              <option>A4</option><option>A3</option><option>A5</option>
-              <option>B5</option><option>Letter</option><option>Legal</option>
-            </select>
-          </label>
-          <label>打印机<select id="opt-printer"><option value="">默认打印机</option></select></label>
+          <div class="options">
+            <label>份数<input id="opt-copies" type="number" min="1" max="99" value="1" /></label>
+            <label>色彩
+              <select id="opt-color">
+                <option value="mono">黑白</option>
+                <option value="color">彩色</option>
+              </select>
+            </label>
+            <label>纸张
+              <select id="opt-paper">
+                <option>A4</option><option>A3</option><option>A5</option>
+                <option>B5</option><option>Letter</option><option>Legal</option>
+              </select>
+            </label>
+            <label>打印机<select id="opt-printer"><option value="">默认打印机</option></select></label>
+          </div>
+
+          <div class="submit-row">
+            <button type="submit" class="btn primary" id="submit-btn">提交打印</button>
+            <span id="print-msg" class="msg"></span>
+          </div>
+        </form>
+      </section>
+
+      <!-- 管理员面板 -->
+      <section id="admin-panel" class="card hidden">
+        <div class="card-head">
+          <div><h2>用户管理</h2><p class="card-sub">新增、修改用户与打印配额</p></div>
+          <button id="new-user-btn" class="btn ghost">＋ 新增用户</button>
         </div>
 
-        <button type="submit" class="primary" id="submit-btn">提交打印</button>
-        <span id="print-msg" class="msg"></span>
-      </form>
-    </section>
+        <form id="user-form" class="user-form hidden">
+          <input type="hidden" id="user-id" />
+          <label>用户名<input id="user-name" type="text" placeholder="3-32 位" /></label>
+          <label>密码<input id="user-pass" type="password" placeholder="留空则不修改" /></label>
+          <label>角色
+            <select id="user-role"><option value="user">普通用户</option><option value="admin">管理员</option></select>
+          </label>
+          <label>打印配额<input id="user-quota" type="number" min="0" value="0" title="0 表示不限次数" /></label>
+          <label>配额窗口(小时)<input id="user-window" type="number" min="0.1" step="0.1" value="3" /></label>
+          <label class="checkbox"><input id="user-enabled" type="checkbox" checked /> 启用</label>
+          <div class="user-form-actions">
+            <button type="button" id="cancel-user" class="btn ghost">取消</button>
+            <button type="submit" class="btn primary">保存</button>
+          </div>
+          <div id="user-msg" class="error"></div>
+        </form>
 
-    <!-- 管理员面板 -->
-    <section id="admin-panel" class="card hidden">
-      <div class="card-head">
-        <h2>用户管理</h2>
-        <button id="new-user-btn" class="ghost">＋ 新增用户</button>
-      </div>
-
-      <form id="user-form" class="user-form hidden">
-        <input type="hidden" id="user-id" />
-        <label>用户名<input id="user-name" type="text" placeholder="3-32 位" /></label>
-        <label>密码<input id="user-pass" type="password" placeholder="留空则不修改" /></label>
-        <label>角色
-          <select id="user-role"><option value="user">普通用户</option><option value="admin">管理员</option></select>
-        </label>
-        <label>打印配额<input id="user-quota" type="number" min="0" value="0" title="0 表示不限次数" /></label>
-        <label>配额窗口(小时)<input id="user-window" type="number" min="0.1" step="0.1" value="3" /></label>
-        <label class="checkbox"><input id="user-enabled" type="checkbox" checked /> 启用</label>
-        <div class="user-form-actions">
-          <button type="button" id="cancel-user" class="ghost">取消</button>
-          <button type="submit" class="primary">保存</button>
+        <div class="table-wrap">
+          <table class="tasks users-table">
+            <thead>
+              <tr><th>用户名</th><th>角色</th><th>状态</th><th>配额</th><th>最近登录</th><th>操作</th></tr>
+            </thead>
+            <tbody id="user-body"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody>
+          </table>
         </div>
-        <div id="user-msg" class="error"></div>
-      </form>
 
-      <table class="tasks users-table">
-        <thead>
-          <tr><th>用户名</th><th>角色</th><th>状态</th><th>配额</th><th>最近登录</th><th>操作</th></tr>
-        </thead>
-        <tbody id="user-body"><tr><td colspan="6" class="empty">加载中…</td></tr></tbody>
-      </table>
+        <div class="card-head usage-head">
+          <div><h3>游客 / IP 用量</h3><p class="card-sub">近 30 天</p></div>
+          <button id="refresh-usage" class="btn ghost">刷新</button>
+        </div>
+        <div class="table-wrap">
+          <table class="tasks usage-table">
+            <thead><tr><th>来源</th><th>次数</th><th>最近</th><th>操作</th></tr></thead>
+            <tbody id="usage-body"><tr><td colspan="4" class="empty">暂无记录</td></tr></tbody>
+          </table>
+        </div>
+      </section>
 
-      <div class="card-head usage-head">
-        <h3>游客/IP 用量（近 30 天）</h3>
-        <button id="refresh-usage" class="ghost">刷新</button>
-      </div>
-      <table class="tasks usage-table">
-        <thead><tr><th>来源</th><th>次数</th><th>最近</th><th>操作</th></tr></thead>
-        <tbody id="usage-body"><tr><td colspan="4" class="empty">暂无记录</td></tr></tbody>
-      </table>
-    </section>
-
-    <section class="card">
-      <div class="card-head">
-        <h2>任务列表</h2>
-        <button id="refresh-btn" class="ghost">刷新</button>
-      </div>
-      <table class="tasks">
-        <thead>
-          <tr><th>文件</th><th>参数</th><th>提交人</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
-        </thead>
-        <tbody id="task-body"><tr><td colspan="6" class="empty">暂无任务</td></tr></tbody>
-      </table>
-    </section>
-  </main>
+      <section class="card">
+        <div class="card-head">
+          <div><h2>任务列表</h2><p class="card-sub">打印进度与历史</p></div>
+          <button id="refresh-btn" class="btn ghost">刷新</button>
+        </div>
+        <div class="table-wrap">
+          <table class="tasks">
+            <thead>
+              <tr><th>文件</th><th>参数</th><th>提交人</th><th>状态</th><th>创建时间</th><th>操作</th></tr>
+            </thead>
+            <tbody id="task-body"><tr><td colspan="6" class="empty">暂无任务</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
 
   <script src="/main.js"></script>
 </body>

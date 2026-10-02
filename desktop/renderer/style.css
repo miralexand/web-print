@@ -17,7 +17,7 @@
   --el-color-primary-light-8: #b3d3f6;
   --el-color-primary-light-9: #e8f1fd;
   --el-color-primary-dark-2: #005bb5;
-  --el-border-radius-base: 10px;
+  --el-border-radius-base: 13px;
   --el-font-size-base: 13px;
 }
 
@@ -75,7 +75,7 @@ body {
   flex-direction: column;
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 16px; }
-.brand-icon { width: 36px; height: 36px; border-radius: 9px; }
+.brand-icon { width: 36px; height: 36px; border-radius: 11px; }
 .brand-name { font-size: 14px; font-weight: 700; letter-spacing: -0.01em; }
 .brand-sub { font-size: 11px; color: var(--muted); }
 
@@ -84,7 +84,7 @@ body {
   display: flex; align-items: center; gap: 10px;
   width: 100%; padding: 9px 11px;
   border: none; background: transparent; cursor: pointer;
-  border-radius: 9px; font-size: 13px; color: var(--text);
+  border-radius: 11px; font-size: 13px; color: var(--text);
   font-family: inherit; text-align: left;
   transition: background 0.15s, color 0.15s;
 }
@@ -106,7 +106,7 @@ body {
 /* 卡片 */
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
 .stat-card {
-  background: var(--card); border-radius: 16px; padding: 18px;
+  background: var(--card); border-radius: 22px; padding: 20px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 10px 30px rgba(0, 0, 0, 0.05);
 }
 .stat-head { display: flex; align-items: center; justify-content: space-between; }
@@ -116,7 +116,7 @@ body {
 .stat-actions { margin-top: 12px; display: flex; gap: 8px; }
 
 .panel {
-  background: var(--card); border-radius: 16px; padding: 16px 18px; margin-top: 18px;
+  background: var(--card); border-radius: 22px; padding: 18px 20px; margin-top: 18px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 10px 30px rgba(0, 0, 0, 0.05);
 }
 .panel-head { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 600; margin-bottom: 10px; }
@@ -126,14 +126,14 @@ body {
 .dot.off { background: var(--red); }
 
 /* 提示条 */
-.notice { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; border-radius: 12px; font-size: 12px; margin-top: 12px; }
+.notice { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 16px; border-radius: 15px; font-size: 12px; margin-top: 12px; }
 .notice.ok { background: #eefcf3; color: #0a7d43; border: 1px solid #c6f0d8; }
 .notice.err { background: #fdecec; color: #c0392b; border: 1px solid #f7c7c7; }
 .notice-actions { display: flex; gap: 8px; }
 
 .logs {
-  margin: 0; background: #1c1c1e; color: #e5e5ea; border-radius: 12px;
-  padding: 12px 14px; font-size: 12px; line-height: 1.6;
+  margin: 0; background: #1c1c1e; color: #e5e5ea; border-radius: 16px;
+  padding: 14px 16px; font-size: 12px; line-height: 1.6;
   max-height: 300px; overflow: auto; white-space: pre-wrap; word-break: break-all;
   font-family: "SF Mono", Consolas, monospace;
 }
@@ -149,7 +149,7 @@ body {
 
 /* 关于 */
 .about-card {
-  max-width: 620px; background: var(--card); border-radius: 20px; padding: 34px 28px;
+  max-width: 620px; background: var(--card); border-radius: 26px; padding: 36px 30px;
   text-align: center; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 14px 40px rgba(0, 0, 0, 0.06);
 }
 .about-icon { width: 88px; height: 88px; border-radius: 20px; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12); }
@@ -179,3 +179,21 @@ body {
 ::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.18); border-radius: 8px; border: 3px solid transparent; background-clip: content-box; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.3); background-clip: content-box; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* 傻瓜教程 */
+.tutorial { margin-top: 14px; }
+.tut-card {
+  border-radius: 18px; background: #fbfbfd; border: 1px solid var(--line);
+  padding: 16px 18px; margin-top: 12px;
+}
+.tut-title { font-size: 13px; font-weight: 650; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.tut-tag { font-size: 11px; padding: 2px 9px; border-radius: 999px; background: var(--accent-weak); color: var(--accent); }
+.tut-tag.gray { background: #ececf0; color: #555; }
+.tut-steps { margin: 0; padding-left: 20px; }
+.tut-steps li { margin: 8px 0; line-height: 1.7; color: #3a3a3c; }
+.kbd {
+  display: inline-block; padding: 1px 7px; border-radius: 7px; font-size: 12px;
+  background: #fff; border: 1px solid var(--line); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.05);
+  font-family: "SF Mono", Consolas, monospace; color: var(--accent);
+}
+.tut-actions { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }

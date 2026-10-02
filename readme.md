@@ -29,8 +29,8 @@
 ## 特性
 
 - **一体化、零 Docker**：单个桌面应用同时运行网页服务与本地打印代理
-- **Apple 风格界面**：Vue 3 + Element Plus，原生标题栏、毛玻璃侧边栏、卡片式布局
-- **Cloudflare Tunnel**：快速隧道（临时公网地址）与命名隧道（Token）两种模式，一键启停
+- **Apple · 北欧极简 UI**：桌面端侧边栏毛玻璃导航；网页端（3000）同为 Apple / 北欧极简风格，大圆角、留白与柔和阴影
+- **Cloudflare Tunnel**：快速隧道（临时公网地址）与命名隧道（Token）两种模式，一键启停，内置**傻瓜教程**
 - **网页打印**：上传 PDF、图片、Word/Excel/PPT，设置份数、黑白/彩色、纸张、指定打印机
 - **账号与配额**：游客默认每 3 小时 5 次；管理员可增删改用户、单独设置每人配额
 - **任务队列**：顺序执行、状态实时可见、失败/取消自动退还配额
@@ -64,13 +64,36 @@ WebPrintTray（单个 Electron 应用）
 
 ## 界面说明
 
-应用左侧为导航栏，包含：
+**桌面应用**左侧为导航栏（圆角卡片、毛玻璃质感）：
 
 - **概览**：三个服务卡片（Web / 打印 / 隧道）状态与快捷开关，运行日志
 - **打印机**：本机打印机与支持的纸张列表
-- **Cloudflare 隧道**：隧道模式、目标地址 / Token、cloudflared 路径与一键下载、实时日志、公网地址复制
+- **Cloudflare 隧道**：模式选择、目标地址 / Token、cloudflared 路径与一键下载、实时日志、公网地址复制，以及内置**傻瓜教程**
 - **设置**：Web 端口、打印端口、访问令牌、LibreOffice 路径、开机自启、数据目录
 - **关于**：版本号、[仓库地址](https://github.com/miralexand/web-print)、问题反馈、检查更新、开源协议与组件版本
+
+**网页端**（<http://127.0.0.1:3000>）同样采用 Apple / 北欧极简设计：大圆角卡片、柔和阴影、留白与 Apple 蓝主色，登录、上传、用户管理与任务列表一应俱全。
+
+## Cloudflare Tunnel 傻瓜教程
+
+> 完整图文教程见 [`docs/cloudflare-tunnel.md`](./docs/cloudflare-tunnel.md)，应用内「Cloudflare 隧道 → 傻瓜教程」也有同款分步指引。
+
+**方式一 · 快速隧道（30 秒上手）**
+
+1. 「Cloudflare 隧道」页 → 模式选 **快速隧道**，目标地址保持 `http://127.0.0.1:3000`
+2. 点 **保存并启动** → 得到形如 `https://xxxx.trycloudflare.com` 的公网地址
+3. 点「复制」发给他人即可（地址每次重启会变化）
+
+**方式二 · 命名隧道（固定域名，推荐）**
+
+1. 把域名接入 Cloudflare（修改 NS 服务器）
+2. Cloudflare 控制台 → **Zero Trust → Networks → Tunnels → Create a tunnel**（类型 Cloudflared）
+3. 复制生成的 **Tunnel Token**
+4. 该隧道 **Public Hostname** 添加：Type=`HTTP`，URL=`127.0.0.1:3000`，Subdomain 自定义
+5. 回到应用：模式选 **命名隧道** → 粘贴 Token → **保存并启动**
+6. 访问 `https://你的子域名.你的域名`
+
+**安全建议**：尽快修改默认账号 `admin/admin123`；可在 Cloudflare **Access** 增加登录策略。
 
 ## 端口与数据
 

@@ -35,7 +35,11 @@ jobs:
       - name: 构建安装包与便携版
         run: npm run dist
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: 列出构建产物
+        if: always()
+        run: Get-ChildItem release -ErrorAction SilentlyContinue | Format-Table Name, Length
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4

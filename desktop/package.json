@@ -1,15 +1,18 @@
 {
   "name": "web-print-tray",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "Windows 打印助手：内置本地打印服务与 Cloudflare Tunnel 管理，托盘常驻，可打包为 exe。",
-  "author": "miralexand",
+  "author": {
+    "name": "miralexand",
+    "email": "dalingaixidelu@163.com"
+  },
   "license": "MulanPSL-2.0",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "vendor": "node scripts/copy-vendor.js",
-    "dist": "electron-builder --win nsis portable --publish never",
+    "dist": "electron-builder --win nsis zip --publish never",
     "pack": "electron-builder --win --dir --publish never"
   },
   "dependencies": {
@@ -45,9 +48,15 @@
     "win": {
       "target": [
         "nsis",
-        "portable"
+        "zip"
       ],
-      "icon": "build/icon.ico"
+      "icon": "build/icon.ico",
+      "artifactName": "WebPrintTray-${version}-${arch}.${ext}",
+      "requestedExecutionLevel": "asInvoker",
+      "signingHashAlgorithms": [
+        "sha256"
+      ],
+      "rfc3161TimeStampServer": "http://timestamp.digicert.com"
     },
     "nsis": {
       "oneClick": false,
@@ -55,7 +64,9 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "WebPrint 打印助手"
+      "shortcutName": "WebPrint 打印助手",
+      "artifactName": "WebPrintTray-Setup-${version}.${ext}",
+      "deleteAppDataOnUninstall": false
     }
   }
 }

@@ -32,6 +32,13 @@ let config = {
 function dataDir() {
   // 便携版：配置与数据保存在 exe 同目录，随程序携带
   if (process.env.PORTABLE_EXECUTABLE_DIR) return process.env.PORTABLE_EXECUTABLE_DIR;
+  // 绿色版：在 exe 同目录放置 portable.flag 即启用便携模式
+  try {
+    const exeDir = path.dirname(process.execPath);
+    if (fs.existsSync(path.join(exeDir, 'portable.flag'))) return exeDir;
+  } catch (_) {
+    /* ignore */
+  }
   return app.getPath('userData');
 }
 

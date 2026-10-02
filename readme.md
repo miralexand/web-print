@@ -59,7 +59,7 @@ curl http://127.0.0.1:8081/health       # 宿主机 Agent
 - **自动转换**：Office/图片由宿主机 LibreOffice 转 PDF 后打印
 - **安全校验**：后缀白名单 + 文件头（magic number）+ 大小限制，打印后自动清理临时文件
 - **登录防爆破**：同一 IP 在窗口内失败次数过多将临时锁定
-- **托盘 exe**：宿主机侧可选图形化托盘应用（Vue3 + Element Plus），内置打印服务与 Cloudflare Tunnel 管理，可打包为安装包 / 免安装 exe
+- **托盘 exe**：宿主机侧可选图形化托盘应用（Vue3 + Element Plus），内置打印服务与 Cloudflare Tunnel 管理，可打包为安装包 / 免安装 zip 绿色版
 - **轻量部署**：Web 端基于 `node:20-alpine`，宿主机 Agent 仅监听本机
 
 ## 整体架构
@@ -228,11 +228,12 @@ docker compose logs -f webprint
 - **Cloudflare Tunnel 管理**：内置快速隧道（临时 `*.trycloudflare.com` 地址）与命名隧道（Token）两种模式，可启停、复制 / 打开公网地址、查看 cloudflared 日志，支持一键下载 cloudflared
 - 界面基于 **Vue 3 + Element Plus**（资源已本地化到 `renderer/vendor`，离线可用）
 - 关闭窗口自动最小化到任务托盘；托盘菜单可显示界面 / 开关服务 / 开关隧道 / 打开 Web 界面 / 退出
-- 可打包为 **NSIS 安装包** 与 **免安装 portable exe**
+- 可打包为 **NSIS 安装包** 与 **免安装 zip 绿色版**
 
-**便携版（portable）说明**
+**绿色版 / 便携模式**
 
-便携版的配置与数据保存在 exe 同目录的 `webprint-config.json`，随程序一起携带，不会写入用户目录；开机自启也会注册到 portable exe 本身，修复了旧版的配置不持久与自启失效问题。
+- `WebPrintTray-<版本>-x64.zip` 解压即用，无需安装
+- 默认配置与数据保存在用户目录；若在 exe 同目录放置一个名为 `portable.flag` 的空文件，即切换为便携模式：配置与数据改存 exe 同目录的 `webprint-config.json`，随程序一起携带
 
 **开发运行**
 
@@ -246,27 +247,49 @@ npm start
 
 ```bash
 cd desktop
-npm run dist        # 生成 release/ 下的安装包与 portable exe
+npm run dist        # 生成 release/ 下的安装包与绿色 zip
 # 或
 npm run pack        # 仅生成免安装目录 release/win-unpacked/
 ```
 
 产物位于 `desktop/release/`：
 
-- `WebPrintTray Setup <版本>.exe`：NSIS 安装包（可选择安装目录、创建桌面快捷方式）
-- `WebPrintTray <版本>.exe`：免安装便携版，双击即用
+- `WebPrintTray-Setup-<版本>.exe`：NSIS 安装包（可选择安装目录、创建桌面快捷方式）
+- `WebPrintTray-<版本>-x64.zip`：免安装绿色版，解压双击 `WebPrintTray.exe` 即用
 
 **GitHub Actions 自动构建**
 
-`.github/workflows/build-desktop.yml` 会在以下情况自动构建 Windows 安装包与便携版：
+`.github/workflows/build-desktop.yml` 会在以下情况自动构建 Windows 安装包与绿色版：
 
-- 推送形如 `v*` 的标签（如 `v1.0.1`）：构建产物自动发布到对应的 GitHub Release
+- 推送形如 `v*` 的标签（如 `v1.0.2`）：构建产物自动发布到对应的 GitHub Release
 - 手动触发（Actions → Build Windows Desktop → Run workflow）
 
 > 如需自定义图标，修改 `desktop/scripts/make-icons.js` 后执行 `node scripts/make-icons.js`，会重新生成 `build/` 下的 `icon.png`、`icon.ico`、`tray.png`。
 > 升级 Vue / Element Plus 后执行 `npm run vendor` 重新同步 `renderer/vendor` 资源。
 
 > Windows 上若本地打包时下载 Electron 出现证书错误，可先设置 `NODE_OPTIONS=--use-system-ca`，必要时配合镜像：`ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/`。
+
+### 关于杀毒软件误报（Windows Defender / SmartScreen）
+
+**为什么会误报？**
+
+这类误报不是程序包含病毒，而是以下因素叠加触发了启发式 / 机器学习判定：
+
+1. **未做代码签名**：没有数字签名的 Electron 程序会被 SmartScreen 标为“未知发布者”，卡巴、Defender 的 ML 引擎也常把 NSIS 自解压包判为 `Trojan:Win32/Wacatac.B!ml` 之类。
+2. **内置 pdf 打印组件**：`pdf-to-printer` 自带 `SumatraPDF-x.x.x-32.exe`，程序运行时会在临时目录释放并执行一个第三方 PE 文件，符合“释放并执行可执行文件”的启发式特征。
+3. **自解压 / 运行时下载**：旧的 portable 自解压包，以及“下载 cloudflared 并运行”的功能，都会增加“下载器”嫌疑。
+
+**如何解决（按推荐程度）**
+
+1. **代码签名（根治）**：购买 OV/EV 代码签名证书，在 CI 中通过 Secrets 配置即可自动签名：
+   - 在仓库 `Settings → Secrets and variables → Actions` 添加
+     - `WINDOWS_CSC_LINK`：证书（`.pfx`）的 base64，或证书文件的可访问 URL
+     - `WINDOWS_CSC_KEY_PASSWORD`：证书密码
+   - 之后打 tag 构建时会自动签名与时间戳，SmartScreen / 杀软误报基本消除。EV 证书可立即获得 SmartScreen 信誉，OV 需要一定下载量积累。
+2. **向微软提交误报**：在 <https://www.microsoft.com/wdsi/filesubmission> 选择“软件开发者”，上传 exe 并说明为误报，通常 24-72 小时可解除；也可提交给其它杀软厂商。
+3. **使用绿色 zip 版**：1.0.2 起已**移除自解压 portable 目标**，改用标准 zip 分发，显著降低启发式命中。
+4. **本机临时放行**：在 Defender「病毒和威胁防护 → 排除项」中加入程序目录，或在 SmartScreen 提示中选择“仍要运行”（仅建议自用）。
+5. **不要使用第三方二次打包**：从官方 Release 下载，避免被再次封装引入可疑特征。
 
 ## 用户与配额
 

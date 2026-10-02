@@ -26,6 +26,7 @@ copy .env.example .env          # Linux/macOS 用 cp
 cd host-print-agent
 npm install
 npm start                        # 监听 127.0.0.1:8081
+# 或改用 desktop/ 打包的托盘版 exe（见「Windows 托盘应用」）
 
 # 3) 回到项目根目录，启动 Web 服务（Docker）
 cd ..
@@ -58,6 +59,7 @@ curl http://127.0.0.1:8081/health       # 宿主机 Agent
 - **自动转换**：Office/图片由宿主机 LibreOffice 转 PDF 后打印
 - **安全校验**：后缀白名单 + 文件头（magic number）+ 大小限制，打印后自动清理临时文件
 - **登录防爆破**：同一 IP 在窗口内失败次数过多将临时锁定
+- **托盘 exe**：宿主机侧可选图形化托盘应用，内置打印服务，可打包为安装包 / 免安装 exe
 - **轻量部署**：Web 端基于 `node:20-alpine`，宿主机 Agent 仅监听本机
 
 ## 整体架构
@@ -85,6 +87,7 @@ Windows 打印服务 / 本地打印机
 
 > **为什么需要宿主机 Agent？**
 > Windows 下 Docker 容器**无法直接访问宿主机打印机驱动**，因此容器只负责 Web 应用，真正打印由宿主机上的小型本地 API 完成。
+> 宿主机侧提供两种等价实现：命令行 Node 版（`host-print-agent/`）或图形托盘版（`desktop/`，可打包成 exe）。
 > 若宿主机是 Linux，可改用容器内 CUPS；本场景宿主机为 Windows，故采用 Agent 方案。
 
 **一次打印的完整链路**
@@ -124,10 +127,17 @@ web-print/
 │       ├── index.html
 │       ├── style.css
 │       └── main.js
-├── host-print-agent/          # ===== 宿主机打印 Agent（Windows 运行）=====
+├── host-print-agent/          # ===== 宿主机打印 Agent（Node 版，可命令行运行）=====
 │   ├── agent.js
 │   ├── package.json
 │   └── README.md
+├── desktop/                   # ===== Windows 托盘应用（Electron，可打包 exe）=====
+│   ├── main.js                # 主进程：窗口、托盘、服务生命周期
+│   ├── preload.js             # 安全桥接
+│   ├── lib/printService.js    # 内置打印服务（与 Agent 等效）
+│   ├── renderer/              # 界面
+│   ├── scripts/make-icons.js  # 生成图标
+│   └── build/                 # 图标资源（icon.png / icon.ico / tray.png）
 ├── data/                      # 用户库与用量数据（挂载进容器）
 ├── logs/                      # 任务记录与日志（挂载进容器）
 └── tmp/                       # 上传临时文件（打印后自动清理）
@@ -180,6 +190,8 @@ npm start
 
 看到 `打印 Agent 已启动：http://127.0.0.1:8081` 即成功。浏览器访问 <http://127.0.0.1:8081/printers> 可检查打印机列表。
 
+> 不想装 Node？可直接使用下方「Windows 托盘应用（Electron）」打包的 exe，功能与命令行 Agent 等价。
+
 ### 3. 构建并启动 Web 服务
 
 ```bash
@@ -199,6 +211,44 @@ docker compose logs -f webprint
    - 关闭缓存（对打印域名 Bypass Cache）
    - 可选开启 **Cloudflare Access** 做二次身份验证
 4. 外网访问：`https://print.yourdomain.com`
+
+## Windows 托盘应用（Electron）
+
+`desktop/` 是一个图形化的宿主机打印助手，内置打印服务，可最小化到任务托盘常驻，适合不想开命令行终端的场景。
+
+**功能**
+
+- 一键启动 / 停止本地打印服务（默认 `127.0.0.1:8081`）
+- 实时显示服务状态、LibreOffice 路径、打印机列表与运行日志
+- 可修改监听端口、访问令牌、LibreOffice 路径，支持开机自启
+- 关闭窗口自动最小化到任务托盘；托盘菜单可显示界面 / 开关服务 / 打开 Web 界面 / 退出
+- 可打包为 **NSIS 安装包** 与 **免安装 portable exe**
+
+**开发运行**
+
+```bash
+cd desktop
+npm install
+npm start
+```
+
+**打包 exe**
+
+```bash
+cd desktop
+npm run dist        # 生成 release/ 下的安装包与 portable exe
+# 或
+npm run pack        # 仅生成免安装目录 release/win-unpacked/
+```
+
+产物位于 `desktop/release/`：
+
+- `WebPrintTray Setup <版本>.exe`：NSIS 安装包（可选择安装目录、创建桌面快捷方式）
+- `WebPrintTray <版本>.exe`：免安装便携版，双击即用
+
+> 如需自定义图标，修改 `desktop/scripts/make-icons.js` 后执行 `node scripts/make-icons.js`，会重新生成 `build/` 下的 `icon.png`、`icon.ico`、`tray.png`。
+
+> Windows 上若打包时下载 Electron 出现证书错误，可先设置 `NODE_OPTIONS=--use-system-ca`，必要时配合镜像：`ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/`。
 
 ## 用户与配额
 

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebPrint 打印助手</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span id="status-dot" class="dot"></span>
+      <span>WebPrint 打印助手</span>
+    </div>
+    <div class="top-right">
+      <span id="status-text" class="badge">加载中…</span>
+      <button id="hide-btn" class="ghost light" title="最小化到托盘">最小化到托盘</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <div class="row">
+        <div>
+          <div class="label">本地打印服务地址</div>
+          <div id="addr" class="value">-</div>
+        </div>
+        <div class="actions">
+          <button id="toggle-btn" class="primary">启动服务</button>
+          <button id="open-web-btn" class="ghost">打开 Web 界面</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>状态</h2>
+      <div class="grid">
+        <div><div class="label">服务</div><div id="info-running" class="value">-</div></div>
+        <div><div class="label">LibreOffice</div><div id="info-soffice" class="value small">-</div></div>
+        <div><div class="label">打印机数量</div><div id="info-printers" class="value">-</div></div>
+      </div>
+      <table class="printers">
+        <thead><tr><th>打印机</th><th>纸张</th></tr></thead>
+        <tbody id="printer-body"><tr><td colspan="2" class="empty">点击刷新查看打印机</td></tr></tbody>
+      </table>
+      <button id="refresh-btn" class="ghost">刷新打印机</button>
+    </section>
+
+    <section class="card">
+      <h2>设置</h2>
+      <form id="config-form">
+        <div class="grid">
+          <label>监听端口<input id="cfg-port" type="number" min="1" max="65535" /></label>
+          <label>访问令牌（可留空）<input id="cfg-token" type="text" placeholder="与 Web 服务 HOST_PRINT_TOKEN 一致" /></label>
+        </div>
+        <label>LibreOffice 路径
+          <div class="input-row">
+            <input id="cfg-soffice" type="text" placeholder="C:\\Program Files\\LibreOffice\\program\\soffice.exe" />
+            <button type="button" id="pick-soffice" class="ghost">浏览</button>
+          </div>
+        </label>
+        <label class="checkbox"><input id="cfg-autostart" type="checkbox" /> 开机自动启动</label>
+        <div class="form-actions">
+          <span id="cfg-msg" class="msg"></span>
+          <button type="submit" class="primary">保存设置</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>运行日志</h2>
+      <pre id="logs" class="logs">-</pre>
+    </section>
+  </main>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

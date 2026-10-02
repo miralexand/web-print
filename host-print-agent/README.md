@@ -2,6 +2,8 @@
 
 Docker 容器无法直接访问 Windows 打印机驱动，因此由这个仅监听本机的 Node 服务承担最后一步打印。
 
+> 需要图形界面 / 托盘常驻？可使用 [`../desktop`](../desktop) 的 Electron 托盘应用，功能与命令行 Agent 等价，并可打包为 exe。
+
 ## 功能
 - `POST /print`：接收文件 + 打印参数，Office/图片自动用 LibreOffice 转 PDF，再调用本机打印机
 - `GET /printers`：返回本机打印机列表

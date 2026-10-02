@@ -4,6 +4,7 @@ logs
 tmp
 data
 host-print-agent
+desktop
 .git
 .gitignore
 .env

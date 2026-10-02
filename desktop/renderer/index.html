@@ -176,7 +176,8 @@
                 <div class="hint">默认指向本机 Web 打印服务</div>
               </el-form-item>
               <el-form-item v-else label="Tunnel Token">
-                <el-input v-model="tunnelForm.token" type="password" show-password placeholder="Cloudflare Zero Trust 隧道 Token" />
+                <el-input v-model="tunnelForm.token" type="password" show-password placeholder="粘贴以 eyJ 开头的 Token，或直接粘贴 cloudflared service install eyJ... 整条命令" />
+                <div class="hint">会自动提取其中的 Token；即使已用「服务方式」安装过，也可在此粘贴同一条命令。</div>
               </el-form-item>
               <el-form-item label="cloudflared">
                 <div class="input-row">
@@ -193,7 +194,17 @@
                 <el-button @click="stopTunnel" :disabled="!tunnel.running">停止</el-button>
                 <el-button link type="primary" @click="openDownloadPage">下载页</el-button>
               </el-form-item>
+              <el-form-item label="系统服务">
+                <el-button size="small" @click="installService" :loading="busy.tunnel">安装为 Windows 服务</el-button>
+                <el-button size="small" @click="uninstallService" :loading="busy.tunnel" :disabled="!tunnel.service || !tunnel.service.installed">卸载系统服务</el-button>
+                <div class="hint">「安装为 Windows 服务」等同于命令行 <span class="kbd">cloudflared service install eyJ...</span>，需以管理员身份运行；安装后隧道由系统托管，本应用无需再启动。</div>
+              </el-form-item>
             </el-form>
+
+            <div v-if="tunnel.managedByService" class="notice ok">
+              <span>检测到 cloudflared 已作为 Windows 系统服务运行，隧道由系统托管，应用不会重复启动连接器。</span>
+              <span class="notice-actions"><el-button size="small" @click="uninstallService" :loading="busy.tunnel">卸载系统服务</el-button></span>
+            </div>
 
             <div v-if="tunnel.error" class="notice err">{{ tunnel.error }}</div>
             <div v-if="tunnel.url" class="notice ok">

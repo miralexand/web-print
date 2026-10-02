@@ -93,6 +93,10 @@ WebPrintTray（单个 Electron 应用）
 5. 回到应用：模式选 **命名隧道** → 粘贴 Token → **保存并启动**
 6. 访问 `https://你的子域名.你的域名`
 
+**已经用 `cloudflared service install eyJ...` 装过？**
+
+应用会自动检测名为 `cloudflared` 的 Windows 服务：服务在运行时显示「隧道由系统托管」，**不会重复启动、不再报错**。也可以把整条命令直接粘贴进 Token 框（应用自动提取 `eyJ...`），或用页面上的「安装为 Windows 服务 / 卸载系统服务」按钮。
+
 **安全建议**：尽快修改默认账号 `admin/admin123`；可在 Cloudflare **Access** 增加登录策略。
 
 ## 端口与数据

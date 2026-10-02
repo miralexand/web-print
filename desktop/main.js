@@ -303,7 +303,7 @@ function updateTrayMenu() {
       click: async () => {
         const mgr = await ensureCloudflared();
         if (tunnelOn) mgr.stop();
-        else mgr.start();
+        else await mgr.start();
         updateTrayMenu();
         broadcastState();
       },
@@ -464,7 +464,7 @@ function registerIpc() {
     if (wasRunning) {
       cloudflared.stop();
       cloudflared.setConfig(config.cloudflare);
-      cloudflared.start();
+      await cloudflared.start();
     } else {
       cloudflared.setConfig(config.cloudflare);
     }
@@ -474,7 +474,7 @@ function registerIpc() {
   ipcMain.handle('cloudflare:start', async () => {
     const mgr = await ensureCloudflared();
     mgr.setConfig(config.cloudflare);
-    mgr.start();
+    await mgr.start();
     updateTrayMenu();
     return { ok: true, state: publicState() };
   });
@@ -482,6 +482,19 @@ function registerIpc() {
     if (cloudflared) cloudflared.stop();
     updateTrayMenu();
     return { ok: true, state: publicState() };
+  });
+  ipcMain.handle('cloudflare:service-install', async () => {
+    const mgr = await ensureCloudflared();
+    mgr.setConfig(config.cloudflare);
+    const result = await mgr.installService();
+    updateTrayMenu();
+    return { ...result, state: publicState() };
+  });
+  ipcMain.handle('cloudflare:service-uninstall', async () => {
+    const mgr = await ensureCloudflared();
+    const result = await mgr.uninstallService();
+    updateTrayMenu();
+    return { ...result, state: publicState() };
   });
   ipcMain.handle('cloudflare:pick', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -561,7 +574,7 @@ if (!gotLock) {
       logLine('Web 服务启动失败:', err && err.stack ? err.stack : err);
       dialog.showErrorBox('Web 服务启动失败', `${(err && err.message) || err}\n\n请在界面中修改 Web 端口后重试。`);
     }
-    if (config.cloudflare.autoStart) cloudflared.start();
+    if (config.cloudflare.autoStart) cloudflared.start().catch(() => {});
     updateTrayMenu();
   });
 

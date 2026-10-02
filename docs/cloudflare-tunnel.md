@@ -32,6 +32,28 @@
 
 ---
 
+## 方式三：已经用 `cloudflared service install` 装过（Windows 服务）
+
+如果你之前用这条命令配置过隧道：
+
+```powershell
+cloudflared.exe service install eyJhIjoi....（一长串 Token）
+```
+
+说明 cloudflared 已经作为 **Windows 系统服务** 常驻运行。此时**不需要**在应用里再启动一次，否则会出现重复连接器 / 报错。应用已针对该场景做了兼容：
+
+1. 应用会自动检测名为 `cloudflared` 的 Windows 服务：
+   - 若服务正在运行，应用会显示「隧道由系统托管」，**不会重复启动**，也不会报错。
+2. 如果你想改用应用内管理：
+   - 先把**整条命令**（`cloudflared service install eyJ...`）或其中的 Token 粘贴到「Tunnel Token」输入框，应用会自动提取 `eyJ...` 部分；
+   - 点 **安装为 Windows 服务** 按钮（等同执行该命令，需以管理员身份运行）；
+   - 需要撤销时点 **卸载系统服务**。
+3. 想彻底改由应用直接启动连接器：先「卸载系统服务」，再回到方式二的第 4 步粘贴 Token 并「保存并启动」。
+
+> 排错提示：Token 无效、隧道未配置 Public Hostname、或系统服务与应用同时抢一个隧道，都会在「cloudflared 日志」中看到原因。
+
+---
+
 ## 方式二：命名隧道（固定域名，推荐长期使用）
 
 ### 第 1 步：把域名接入 Cloudflare
@@ -96,3 +118,6 @@
 
 **Q5：如何停止对外服务？**
 在「Cloudflare 隧道」页点 **停止**，或直接退出应用。
+
+**Q6：我用 `cloudflared service install eyJ...` 装的隧道，加进应用报错？**
+应用已兼容：会自动识别该 Windows 服务并显示「系统托管」，不再重复启动。也可以把整条命令粘贴进 Token 框（会自动提取 Token），或直接用应用里的「安装为 Windows 服务 / 卸载系统服务」按钮。

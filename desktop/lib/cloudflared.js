@@ -1,14 +1,17 @@
 'use strict';
 
 /**
- * Cloudflare Tunnel 管理：以子进程方式启停 cloudflared。
- * - quick 模式：cloudflared tunnel --url <目标地址>，解析 trycloudflare 公网地址
- * - token 模式：cloudflared tunnel run --token <token>
+ * Cloudflare Tunnel 管理。
+ * 支持三种运行方式：
+ *   - quick：cloudflared tunnel --url <目标地址>，解析 trycloudflare 公网地址
+ *   - token：cloudflared tunnel run --token <token>（应用内启动连接器）
+ *   - 兼容已用 `cloudflared service install <token>` 安装的 Windows 系统服务：
+ *       检测到服务在运行时，应用不会重复启动，避免连接器/端口冲突报错
  */
 
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 
 const URL_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/gi;
 
@@ -30,6 +33,41 @@ function findCloudflared(extra) {
   return 'cloudflared';
 }
 
+/**
+ * 从用户输入中提取纯 Tunnel Token。
+ * 兼容直接粘贴 `cloudflared.exe service install eyJ...` 这样的完整命令。
+ */
+function normalizeToken(input) {
+  let text = String(input == null ? '' : input).trim();
+  if (!text) return '';
+  text = text.replace(/^["'`]|["'`]$/g, '');
+  const jwt = text.match(/eyJ[A-Za-z0-9._-]{20,}/);
+  if (jwt) return jwt[0];
+  const parts = text.split(/\s+/).filter(Boolean);
+  if (parts.length > 1) return parts.slice().sort((a, b) => b.length - a.length)[0];
+  return text;
+}
+
+function queryCloudflaredService() {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') return resolve({ installed: false, running: false });
+    execFile('sc', ['query', 'cloudflared'], { windowsHide: true, timeout: 8000 }, (err, stdout) => {
+      if (err) return resolve({ installed: false, running: false });
+      return resolve({ installed: true, running: /RUNNING/i.test(stdout || '') });
+    });
+  });
+}
+
+function runCommand(exe, args, timeout = 120000) {
+  return new Promise((resolve) => {
+    execFile(exe, args, { windowsHide: true, timeout }, (err, stdout, stderr) => {
+      const output = `${stdout || ''}${stderr || ''}`.trim();
+      if (err) return resolve({ ok: false, error: output || err.message, output });
+      return resolve({ ok: true, output });
+    });
+  });
+}
+
 class CloudflaredManager {
   constructor(options = {}) {
     this.config = {
@@ -40,14 +78,18 @@ class CloudflaredManager {
     };
     this.proc = null;
     this.running = false;
+    this.managedByService = false;
     this.url = '';
     this.error = '';
     this.logs = [];
+    this.serviceStatus = { installed: false, running: false };
     this.onChange = options.onChange || (() => {});
+    this._poll = setInterval(() => this.refreshService(), 5000);
   }
 
   setConfig(patch = {}) {
     this.config = { ...this.config, ...patch };
+    if (this.config.token) this.config.token = normalizeToken(this.config.token);
   }
 
   log(line) {
@@ -69,6 +111,8 @@ class CloudflaredManager {
       token: this.config.token,
       cloudflaredPath: this.config.cloudflaredPath,
       resolvedPath: this.resolvedPath(),
+      managedByService: this.managedByService,
+      service: this.serviceStatus,
     };
   }
 
@@ -76,19 +120,49 @@ class CloudflaredManager {
     return this.config.cloudflaredPath || findCloudflared();
   }
 
-  start() {
-    if (this.running) return this.state();
+  async refreshService() {
+    const next = await queryCloudflaredService();
+    const changed = next.installed !== this.serviceStatus.installed || next.running !== this.serviceStatus.running;
+    this.serviceStatus = next;
+    if (next.running) {
+      if (!this.managedByService) {
+        this.managedByService = true;
+        this.running = true;
+        this.log('检测到 cloudflared 已作为 Windows 系统服务运行，应用将不再重复启动。');
+      }
+    } else if (this.managedByService && !this.proc) {
+      this.managedByService = false;
+      this.running = false;
+    }
+    if (changed) this.onChange();
+    return this.serviceStatus;
+  }
+
+  async start() {
     this.error = '';
     this.url = '';
-    const exe = this.resolvedPath();
+    await this.refreshService();
 
-    let args;
     if (this.config.mode === 'token') {
-      if (!this.config.token) {
-        this.error = '命名隧道模式需要填写 Tunnel Token';
+      const token = normalizeToken(this.config.token);
+      this.config.token = token;
+      if (!token) {
+        this.error = '未检测到有效的 Tunnel Token：请粘贴以 eyJ 开头的 Token，或直接粘贴 `cloudflared service install eyJ...` 整条命令。';
         this.onChange();
         return this.state();
       }
+      if (this.serviceStatus.running) {
+        this.managedByService = true;
+        this.running = true;
+        this.log('隧道由 Windows 系统服务托管，运行中；如需修改请先卸载系统服务。');
+        this.onChange();
+        return this.state();
+      }
+    }
+
+    const exe = this.resolvedPath();
+    let args;
+    if (this.config.mode === 'token') {
       args = ['tunnel', 'run', '--token', this.config.token, '--no-autoupdate'];
     } else {
       const target = this.config.url || 'http://127.0.0.1:3000';
@@ -107,6 +181,7 @@ class CloudflaredManager {
     }
 
     this.running = true;
+    this.managedByService = false;
     this.onChange();
 
     const handle = (chunk) => {
@@ -132,7 +207,7 @@ class CloudflaredManager {
       this.running = false;
       this.proc = null;
       if (code !== 0 && !this.url) {
-        this.error = this.error || `cloudflared 已退出（退出码 ${code}）`;
+        this.error = `cloudflared 已退出（退出码 ${code}），请查看下方日志。常见原因：Token 无效、隧道未配置 Public Hostname，或已被系统服务占用。`;
       }
       this.log(`cloudflared 已退出，退出码 ${code}`);
       this.onChange();
@@ -142,6 +217,14 @@ class CloudflaredManager {
   }
 
   stop() {
+    if (this.managedByService && !this.proc) {
+      this.log('隧道由 Windows 系统服务托管，已停止应用内管理；如需彻底停止请在服务管理器停止 cloudflared 服务，或点击“卸载系统服务”。');
+      this.managedByService = false;
+      this.running = false;
+      this.url = '';
+      this.onChange();
+      return this.state();
+    }
     if (!this.proc) {
       this.running = false;
       return this.state();
@@ -162,9 +245,35 @@ class CloudflaredManager {
     return this.state();
   }
 
+  /** 以 Windows 服务方式安装并接管隧道（需要管理员权限） */
+  async installService() {
+    const token = normalizeToken(this.config.token);
+    if (!token) {
+      return { ok: false, error: '请先填写 Tunnel Token，再安装为系统服务。' };
+    }
+    this.config.token = token;
+    const result = await runCommand(this.resolvedPath(), ['service', 'install', token]);
+    await this.refreshService();
+    this.onChange();
+    if (!result.ok) {
+      return { ok: false, error: `${result.error}\n（安装系统服务通常需要以管理员身份运行本程序）` };
+    }
+    return { ok: true, output: result.output };
+  }
+
+  /** 卸载 cloudflared Windows 服务（需要管理员权限） */
+  async uninstallService() {
+    const result = await runCommand(this.resolvedPath(), ['service', 'uninstall']);
+    await this.refreshService();
+    this.onChange();
+    if (!result.ok) return { ok: false, error: `${result.error}\n（卸载系统服务通常需要以管理员身份运行本程序）` };
+    return { ok: true, output: result.output };
+  }
+
   dispose() {
+    clearInterval(this._poll);
     this.stop();
   }
 }
 
-module.exports = { CloudflaredManager, findCloudflared };
+module.exports = { CloudflaredManager, findCloudflared, normalizeToken, queryCloudflaredService };

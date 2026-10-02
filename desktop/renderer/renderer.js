@@ -41,6 +41,8 @@ const app = createApp({
       token: '',
       cloudflaredPath: '',
       resolvedPath: '',
+      managedByService: false,
+      service: { installed: false, running: false },
     });
 
     const printers = ref([]);
@@ -91,6 +93,8 @@ const app = createApp({
         tunnel.token = s.cloudflare.token;
         tunnel.cloudflaredPath = s.cloudflare.cloudflaredPath;
         tunnel.resolvedPath = s.cloudflare.resolvedPath;
+        tunnel.managedByService = s.cloudflare.managedByService;
+        tunnel.service = s.cloudflare.service || { installed: false, running: false };
       }
       if (!initialized.value) {
         initForms(s);
@@ -206,6 +210,30 @@ const app = createApp({
       if (res.ok) tunnelForm.cloudflaredPath = res.path;
     }
 
+    async function installService() {
+      busy.tunnel = true;
+      try {
+        const res = await window.trayApi.tunnelServiceInstall();
+        if (res.state) syncState(res.state);
+        if (res.ok) ElMessage.success('已安装为 Windows 系统服务并启动');
+        else ElMessage.error(res.error || '安装失败');
+      } finally {
+        busy.tunnel = false;
+      }
+    }
+
+    async function uninstallService() {
+      busy.tunnel = true;
+      try {
+        const res = await window.trayApi.tunnelServiceUninstall();
+        if (res.state) syncState(res.state);
+        if (res.ok) ElMessage.success('已卸载 Windows 系统服务');
+        else ElMessage.error(res.error || '卸载失败');
+      } finally {
+        busy.tunnel = false;
+      }
+    }
+
     async function pickSoffice() {
       const res = await window.trayApi.pickSoffice();
       if (res.ok) serviceForm.sofficePath = res.path;
@@ -290,6 +318,8 @@ const app = createApp({
       stopTunnel,
       pickCloudflared,
       pickSoffice,
+      installService,
+      uninstallService,
       downloadCloudflared,
       openWeb,
       openDownloadPage,

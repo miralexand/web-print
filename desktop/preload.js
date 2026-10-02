@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('trayApi', {
   tunnelPick: () => ipcRenderer.invoke('cloudflare:pick'),
   tunnelDownload: () => ipcRenderer.invoke('cloudflare:download'),
   tunnelOpenDownload: () => ipcRenderer.invoke('cloudflare:open-download'),
+  tunnelServiceInstall: () => ipcRenderer.invoke('cloudflare:service-install'),
+  tunnelServiceUninstall: () => ipcRenderer.invoke('cloudflare:service-uninstall'),
 
   openWeb: () => ipcRenderer.invoke('app:open-web'),
   openExternal: (url) => ipcRenderer.invoke('app:open-external', url),

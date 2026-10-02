@@ -97,6 +97,15 @@ WebPrintTray（单个 Electron 应用）
 
 应用会自动检测名为 `cloudflared` 的 Windows 服务：服务在运行时显示「隧道由系统托管」，**不会重复启动、不再报错**。也可以把整条命令直接粘贴进 Token 框（应用自动提取 `eyJ...`），或用页面上的「安装为 Windows 服务 / 卸载系统服务」按钮。
 
+**把打印服务（8081）以「域名 + 路径」暴露（跨机部署时）**
+
+1. 「设置」页填写「打印服务路径前缀」如 `/agent`，并设置**访问令牌**
+2. Cloudflare **Public Hostname**：Path=`/agent`，Type=`HTTP`，URL=`127.0.0.1:8081`
+3. 远端 Web 服务设 `HOST_PRINT_API=https://你的域名/agent`、`HOST_PRINT_TOKEN=同一令牌`
+4. 访问 `https://你的域名/agent/health` 验证
+
+> 安全：暴露公网务必设置访问令牌。完整步骤见 [`docs/cloudflare-tunnel.md`](./docs/cloudflare-tunnel.md)。
+
 **安全建议**：尽快修改默认账号 `admin/admin123`；可在 Cloudflare **Access** 增加登录策略。
 
 ## 端口与数据

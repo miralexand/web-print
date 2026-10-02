@@ -54,6 +54,27 @@ cloudflared.exe service install eyJhIjoi....（一长串 Token）
 
 ---
 
+## 进阶：把打印服务（8081）也通过「域名 + 路径」暴露
+
+默认 Web 服务与打印服务都在同一台机器，Web 服务用 `http://127.0.0.1:8081` 就能调用打印服务，**通常不需要暴露 8081**。
+
+只有当「Web 服务」部署在另一台机器/云端，需要跨网络调用你本机的打印服务时，才把 8081 暴露出去。推荐用 **路径前缀** 的方式：
+
+1. 在应用「设置」页，把「打印服务路径前缀」填为 `/agent`，并设置一个**强访问令牌**（访问令牌输入框）。
+2. 打开同一个（或新建）Cloudflare Tunnel 的 **Public Hostname**，添加：
+   - Subdomain / Domain：例如 `print` + 你的域名
+   - **Path**：`/agent`
+   - **Type**：`HTTP`
+   - **URL**：`127.0.0.1:8081`
+3. 在**远端**的 Web 服务里，把 `HOST_PRINT_API` 设为 `https://print.你的域名/agent`、`HOST_PRINT_TOKEN` 设为同样的令牌。
+4. 验证：浏览器访问 `https://print.你的域名/agent/health`，应返回 `{"ok":true,...}`。
+
+> ⚠️ 安全：打印服务一旦暴露到公网，**必须设置访问令牌**，否则任何人都能提交打印任务。可在 Cloudflare Access 再加一层登录保护。
+
+> 原理：Cloudflare 会把路径原样转发给源站，所以应用内置的打印服务同时支持根路径和自定义前缀，前缀填 `/agent` 即可对上。
+
+---
+
 ## 方式二：命名隧道（固定域名，推荐长期使用）
 
 ### 第 1 步：把域名接入 Cloudflare

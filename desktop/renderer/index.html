@@ -233,6 +233,10 @@
               <el-form-item label="访问令牌">
                 <el-input v-model="serviceForm.token" placeholder="Web 与打印服务之间的令牌（可留空）" />
               </el-form-item>
+              <el-form-item label="打印服务路径前缀">
+                <el-input v-model="serviceForm.agentBasePath" placeholder="如 /agent，留空则仅根路径" />
+                <div class="hint">用于通过 Cloudflare 隧道以「域名 + 路径」暴露 8081：Public Hostname 的 Path 填 <span class="kbd">/agent</span>，Service 填 <span class="kbd">http://127.0.0.1:8081</span>，此处也填 <span class="kbd">/agent</span>；并请务必设置访问令牌。</div>
+              </el-form-item>
               <el-form-item label="LibreOffice">
                 <div class="input-row">
                   <el-input v-model="serviceForm.sofficePath" placeholder="留空自动探测" />

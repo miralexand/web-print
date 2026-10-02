@@ -21,6 +21,18 @@ const upload = multer({
 
 const PAPER_SIZES = new Set(['A3', 'A4', 'A5', 'B5', 'Letter', 'Legal']);
 
+/** 修复 multipart 文件名乱码（busboy 默认 latin1 解析） */
+function decodeFilename(name) {
+  if (!name) return name;
+  if (/[^\u0000-\u00ff]/.test(name)) return name;
+  try {
+    const decoded = Buffer.from(name, 'latin1').toString('utf8');
+    return decoded.includes('\uFFFD') ? name : decoded;
+  } catch (_) {
+    return name;
+  }
+}
+
 function toInt(value, fallback, min, max) {
   const n = Number.parseInt(value, 10);
   if (!Number.isFinite(n)) return fallback;
@@ -33,6 +45,9 @@ function currentQuota(req) {
 }
 
 router.post('/print', upload.single('file'), (req, res) => {
+  if (req.file && req.file.originalname) {
+    req.file.originalname = decodeFilename(req.file.originalname);
+  }
   const result = validateUpload(req.file, config.maxFileSize);
   if (!result.ok) {
     return res.status(400).json({ error: result.error });

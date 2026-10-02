@@ -25,6 +25,7 @@ let config = {
   webPort: 3000,
   webHost: '127.0.0.1',
   token: '',
+  agentBasePath: '',
   webUser: 'admin',
   webPass: 'admin123',
   sessionSecret: '',
@@ -123,6 +124,7 @@ function buildService() {
     host: '127.0.0.1',
     port: config.port,
     token: config.token,
+    basePath: config.agentBasePath,
     sofficePath: config.sofficePath || findSoffice(),
   });
 }
@@ -339,6 +341,7 @@ function publicState() {
     host: '127.0.0.1',
     port: config.port,
     token: config.token,
+    basePath: config.agentBasePath || '',
     sofficePath: config.sofficePath || findSoffice(),
     autoStart: config.autoStart,
     portable: !!process.env.PORTABLE_EXECUTABLE_DIR,
@@ -430,6 +433,7 @@ function registerIpc() {
     if (patch.port !== undefined) config.port = Number.parseInt(patch.port, 10) || 8081;
     if (patch.webPort !== undefined) config.webPort = Number.parseInt(patch.webPort, 10) || 3000;
     if (patch.token !== undefined) config.token = String(patch.token || '');
+    if (patch.agentBasePath !== undefined) config.agentBasePath = String(patch.agentBasePath || '').trim();
     if (patch.sofficePath !== undefined) config.sofficePath = String(patch.sofficePath || '');
     if (patch.autoStart !== undefined) config.autoStart = !!patch.autoStart;
     saveConfig();

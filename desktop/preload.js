@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld('trayApi', {
   saveConfig: (patch) => ipcRenderer.invoke('config:save', patch),
   pickSoffice: () => ipcRenderer.invoke('dialog:pick-soffice'),
 
+  webStart: () => ipcRenderer.invoke('web:start'),
+  webStop: () => ipcRenderer.invoke('web:stop'),
+
   tunnelStart: () => ipcRenderer.invoke('cloudflare:start'),
   tunnelStop: () => ipcRenderer.invoke('cloudflare:stop'),
   tunnelSave: (patch) => ipcRenderer.invoke('cloudflare:save', patch),

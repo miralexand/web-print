@@ -11,182 +11,218 @@
 </head>
 <body>
   <div id="app" v-cloak>
-    <el-container class="layout">
-      <el-header class="app-header" height="60px">
+    <!-- 自定义标题栏（macOS 风格，可拖动） -->
+    <div class="titlebar">
+      <div class="titlebar-left"></div>
+      <div class="titlebar-title">{{ state.about.name || 'WebPrint 打印助手' }}</div>
+      <div class="titlebar-right">
+        <span class="dot" :class="state.web.running ? 'on' : 'off'"></span>
+        <span class="mini">Web</span>
+        <span class="dot" :class="state.running ? 'on' : 'off'"></span>
+        <span class="mini">打印</span>
+        <span class="dot" :class="tunnel.running ? 'on' : 'off'"></span>
+        <span class="mini">隧道</span>
+      </div>
+    </div>
+
+    <div class="shell">
+      <aside class="sidebar">
         <div class="brand">
-          <span class="dot" :class="state.running ? 'on' : 'off'"></span>
-          <span>WebPrint 打印助手</span>
-          <el-tag v-if="state.portable" type="warning" effect="dark" size="small">便携版</el-tag>
+          <img class="brand-icon" src="../build/icon.png" alt="icon" />
+          <div>
+            <div class="brand-name">WebPrint</div>
+            <div class="brand-sub">打印助手</div>
+          </div>
         </div>
-        <div class="header-right">
-          <el-tag :type="state.running ? 'success' : 'danger'" effect="dark">服务{{ state.running ? '运行中' : '已停止' }}</el-tag>
-          <el-tag :type="tunnel.running ? 'success' : 'info'" effect="plain">隧道{{ tunnel.running ? '运行中' : '未启动' }}</el-tag>
-          <el-button text @click="hideToTray">最小化到托盘</el-button>
+        <nav class="nav">
+          <button v-for="item in nav" :key="item.key" class="nav-item" :class="{ active: tab === item.key }" @click="tab = item.key">
+            <span class="nav-ico">{{ item.icon }}</span>
+            <span>{{ item.label }}</span>
+          </button>
+        </nav>
+        <div class="sidebar-foot">
+          <div class="foot-dot" :class="allRunning ? 'on' : 'warn'"></div>
+          <span>{{ allRunning ? '全部服务运行中' : '部分服务已停止' }}</span>
         </div>
-      </el-header>
+      </aside>
 
-      <el-main class="app-main">
-        <el-tabs v-model="tab">
-          <!-- 概览 -->
-          <el-tab-pane label="概览" name="overview">
-            <el-card shadow="never" class="mb">
-              <template #header>
-                <div class="card-head">
-                  <span>本地打印服务</span>
-                  <el-button :type="state.running ? 'danger' : 'primary'" @click="toggleService" :loading="busy.service">
-                    {{ state.running ? '停止服务' : '启动服务' }}
-                  </el-button>
-                </div>
-              </template>
-              <el-descriptions :column="2" border>
-                <el-descriptions-item label="服务地址">{{ 'http://' + state.host + ':' + state.port }}</el-descriptions-item>
-                <el-descriptions-item label="运行状态">
-                  <el-tag :type="state.running ? 'success' : 'info'" size="small">{{ state.running ? '运行中' : '已停止' }}</el-tag>
-                </el-descriptions-item>
-                <el-descriptions-item label="LibreOffice">
-                  <span class="mono small">{{ state.sofficePath || '未找到' }}</span>
-                </el-descriptions-item>
-                <el-descriptions-item label="打印机数量">{{ printers.length }}</el-descriptions-item>
-                <el-descriptions-item label="配置目录" :span="2">
-                  <span class="mono small">{{ state.dataDir }}</span>
-                </el-descriptions-item>
-              </el-descriptions>
-              <div class="actions mt">
-                <el-button type="primary" plain @click="openWeb">打开 Web 打印界面</el-button>
-                <el-button @click="refreshAll">刷新</el-button>
+      <main class="content">
+        <!-- 概览 -->
+        <section v-show="tab === 'overview'">
+          <h1 class="page-title">概览</h1>
+          <p class="page-sub">一体化运行，无需 Docker</p>
+
+          <div class="cards">
+            <div class="stat-card">
+              <div class="stat-head"><span class="stat-name">Web 打印服务</span><span class="dot" :class="state.web.running ? 'on' : 'off'"></span></div>
+              <div class="stat-value">{{ state.web.url }}</div>
+              <div class="stat-desc">{{ state.web.running ? '网页界面可访问，可在此上传打印' : '未启动' }}</div>
+              <div class="stat-actions">
+                <el-button :type="state.web.running ? 'default' : 'primary'" size="small" @click="toggleWeb" :loading="busy.web">
+                  {{ state.web.running ? '停止' : '启动' }}
+                </el-button>
+                <el-button size="small" @click="openWeb" :disabled="!state.web.running">打开界面</el-button>
               </div>
-            </el-card>
+            </div>
 
-            <el-card shadow="never">
-              <template #header>
-                <div class="card-head">
-                  <span>Cloudflare 隧道</span>
-                  <el-tag :type="tunnel.running ? 'success' : 'info'">{{ tunnel.running ? '运行中' : '未启动' }}</el-tag>
+            <div class="stat-card">
+              <div class="stat-head"><span class="stat-name">本地打印服务</span><span class="dot" :class="state.running ? 'on' : 'off'"></span></div>
+              <div class="stat-value">http://127.0.0.1:{{ state.port }}</div>
+              <div class="stat-desc">接收 Web 服务转发，调用本机打印机</div>
+              <div class="stat-actions">
+                <el-button :type="state.running ? 'default' : 'primary'" size="small" @click="toggleService" :loading="busy.service">
+                  {{ state.running ? '停止' : '启动' }}
+                </el-button>
+              </div>
+            </div>
+
+            <div class="stat-card">
+              <div class="stat-head"><span class="stat-name">Cloudflare 隧道</span><span class="dot" :class="tunnel.running ? 'on' : 'off'"></span></div>
+              <div class="stat-value">{{ tunnel.url || '未启动' }}</div>
+              <div class="stat-desc">将本地 Web 服务安全发布到公网</div>
+              <div class="stat-actions">
+                <el-button :type="tunnel.running ? 'default' : 'primary'" size="small" @click="tunnelRunning ? stopTunnel() : startTunnel()" :loading="busy.tunnel">
+                  {{ tunnel.running ? '停止' : '启动' }}
+                </el-button>
+                <el-button size="small" @click="tab = 'tunnel'">配置</el-button>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><span>运行日志</span><el-button text size="small" @click="refresh">刷新</el-button></div>
+            <pre class="logs">{{ serviceLogs || '暂无日志' }}</pre>
+          </div>
+        </section>
+
+        <!-- 打印机 -->
+        <section v-show="tab === 'printers'">
+          <h1 class="page-title">打印机</h1>
+          <p class="page-sub">本机检测到的打印机</p>
+          <div class="panel">
+            <div class="panel-head">
+              <span>共 {{ printers.length }} 台</span>
+              <el-button size="small" @click="loadPrinters" :loading="busy.printers">刷新</el-button>
+            </div>
+            <el-table :data="printers" stripe v-loading="busy.printers" empty-text="未检测到打印机">
+              <el-table-column prop="name" label="打印机名称" min-width="240" />
+              <el-table-column label="支持纸张">
+                <template #default="{ row }">
+                  <span class="muted">{{ (row.paperSizes || []).join('、') || '-' }}</span>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </section>
+
+        <!-- 隧道 -->
+        <section v-show="tab === 'tunnel'">
+          <h1 class="page-title">Cloudflare 隧道</h1>
+          <p class="page-sub">把本地 Web 服务发布到公网，无需公网 IP</p>
+          <div class="panel">
+            <el-form label-width="120px" label-position="left">
+              <el-form-item label="隧道模式">
+                <el-radio-group v-model="tunnelForm.mode">
+                  <el-radio-button value="quick">快速隧道</el-radio-button>
+                  <el-radio-button value="token">命名隧道</el-radio-button>
+                </el-radio-group>
+              </el-form-item>
+              <el-form-item v-if="tunnelForm.mode === 'quick'" label="目标地址">
+                <el-input v-model="tunnelForm.url" placeholder="http://127.0.0.1:3000" />
+                <div class="hint">默认指向本机 Web 打印服务</div>
+              </el-form-item>
+              <el-form-item v-else label="Tunnel Token">
+                <el-input v-model="tunnelForm.token" type="password" show-password placeholder="Cloudflare Zero Trust 隧道 Token" />
+              </el-form-item>
+              <el-form-item label="cloudflared">
+                <div class="input-row">
+                  <el-input v-model="tunnelForm.cloudflaredPath" placeholder="留空自动查找或在 PATH 中" />
+                  <el-button @click="pickCloudflared">浏览</el-button>
+                  <el-button @click="downloadCloudflared" :loading="busy.download">下载</el-button>
                 </div>
-              </template>
-              <div v-if="tunnel.url" class="tunnel-url">
-                <span class="mono">{{ tunnel.url }}</span>
+                <div class="hint">当前解析：<span class="mono">{{ tunnel.resolvedPath || '未找到' }}</span></div>
+              </el-form-item>
+              <el-form-item label="随程序启动"><el-switch v-model="tunnelForm.autoStart" /></el-form-item>
+              <el-form-item>
+                <el-button type="primary" @click="saveTunnel(true)" :loading="busy.tunnel">保存并启动</el-button>
+                <el-button @click="saveTunnel(false)" :loading="busy.tunnel">仅保存</el-button>
+                <el-button @click="stopTunnel" :disabled="!tunnel.running">停止</el-button>
+                <el-button link type="primary" @click="openDownloadPage">下载页</el-button>
+              </el-form-item>
+            </el-form>
+
+            <div v-if="tunnel.error" class="notice err">{{ tunnel.error }}</div>
+            <div v-if="tunnel.url" class="notice ok">
+              <span class="mono">{{ tunnel.url }}</span>
+              <span class="notice-actions">
                 <el-button size="small" @click="copyUrl">复制</el-button>
-              </div>
-              <div v-else class="muted">尚未生成公网地址，请到「Cloudflare 隧道」页启动。</div>
-            </el-card>
-          </el-tab-pane>
-
-          <!-- 打印机 -->
-          <el-tab-pane label="打印机" name="printers">
-            <el-card shadow="never">
-              <template #header>
-                <div class="card-head">
-                  <span>本机打印机</span>
-                  <el-button @click="loadPrinters" :loading="busy.printers">刷新</el-button>
-                </div>
-              </template>
-              <el-table :data="printers" stripe v-loading="busy.printers" empty-text="未检测到打印机">
-                <el-table-column prop="name" label="打印机名称" min-width="220" />
-                <el-table-column label="支持纸张">
-                  <template #default="{ row }">
-                    <span class="muted small">{{ (row.paperSizes || []).join('、') || '-' }}</span>
-                  </template>
-                </el-table-column>
-              </el-table>
-            </el-card>
-          </el-tab-pane>
-
-          <!-- Cloudflare 隧道 -->
-          <el-tab-pane label="Cloudflare 隧道" name="tunnel">
-            <el-card shadow="never" class="mb">
-              <el-alert
-                title="通过 Cloudflare Tunnel 将本地 Web 打印服务安全发布到公网，无需公网 IP 或开放端口。"
-                type="info" :closable="false" show-icon class="mb" />
-              <el-form label-width="140px">
-                <el-form-item label="隧道模式">
-                  <el-radio-group v-model="tunnelForm.mode">
-                    <el-radio-button value="quick">快速隧道</el-radio-button>
-                    <el-radio-button value="token">命名隧道</el-radio-button>
-                  </el-radio-group>
-                </el-form-item>
-                <el-form-item v-if="tunnelForm.mode === 'quick'" label="目标地址">
-                  <el-input v-model="tunnelForm.url" placeholder="http://127.0.0.1:3000" />
-                  <div class="hint">指向本机 Web 打印服务，默认 http://127.0.0.1:3000</div>
-                </el-form-item>
-                <el-form-item v-else label="Tunnel Token">
-                  <el-input v-model="tunnelForm.token" type="password" show-password placeholder="在 Cloudflare Zero Trust 中创建的隧道 Token" />
-                </el-form-item>
-                <el-form-item label="cloudflared 路径">
-                  <div class="input-row">
-                    <el-input v-model="tunnelForm.cloudflaredPath" placeholder="留空则自动查找，或在 PATH 中" />
-                    <el-button @click="pickCloudflared">浏览</el-button>
-                    <el-button @click="downloadCloudflared" :loading="busy.download">下载</el-button>
-                  </div>
-                  <div class="hint">当前解析：<span class="mono">{{ tunnel.resolvedPath || '未找到' }}</span></div>
-                </el-form-item>
-                <el-form-item label="随程序启动">
-                  <el-switch v-model="tunnelForm.autoStart" />
-                </el-form-item>
-                <el-form-item>
-                  <el-button type="primary" @click="saveTunnel(true)" :loading="busy.tunnel">保存并启动</el-button>
-                  <el-button @click="saveTunnel(false)" :loading="busy.tunnel">仅保存</el-button>
-                  <el-button type="danger" plain @click="stopTunnel" :disabled="!tunnel.running">停止隧道</el-button>
-                  <el-button link type="primary" @click="openDownloadPage">下载页</el-button>
-                </el-form-item>
-              </el-form>
-
-              <el-alert v-if="tunnel.error" :title="tunnel.error" type="error" :closable="false" show-icon class="mb" />
-              <div v-if="tunnel.url" class="tunnel-url">
-                <span>公网地址：</span>
-                <span class="mono">{{ tunnel.url }}</span>
-                <el-button size="small" type="primary" plain @click="copyUrl">复制</el-button>
                 <el-button size="small" @click="openExternal(tunnel.url)">打开</el-button>
-              </div>
-            </el-card>
+              </span>
+            </div>
+          </div>
 
-            <el-card shadow="never">
-              <template #header>cloudflared 日志</template>
-              <pre class="logs">{{ tunnelLogs || '暂无日志' }}</pre>
-            </el-card>
-          </el-tab-pane>
+          <div class="panel">
+            <div class="panel-head"><span>cloudflared 日志</span></div>
+            <pre class="logs">{{ tunnelLogs || '暂无日志' }}</pre>
+          </div>
+        </section>
 
-          <!-- 设置 -->
-          <el-tab-pane label="设置" name="settings">
-            <el-card shadow="never">
-              <el-form label-width="140px">
-                <el-form-item label="监听端口">
-                  <el-input-number v-model="serviceForm.port" :min="1" :max="65535" controls-position="right" />
-                </el-form-item>
-                <el-form-item label="访问令牌">
-                  <el-input v-model="serviceForm.token" placeholder="与 Web 服务 HOST_PRINT_TOKEN 保持一致（可留空）" />
-                </el-form-item>
-                <el-form-item label="LibreOffice 路径">
-                  <div class="input-row">
-                    <el-input v-model="serviceForm.sofficePath" placeholder="留空则自动探测" />
-                    <el-button @click="pickSoffice">浏览</el-button>
-                  </div>
-                </el-form-item>
-                <el-form-item label="开机自动启动">
-                  <el-switch v-model="serviceForm.autoStart" />
-                </el-form-item>
-                <el-form-item>
-                  <el-button type="primary" @click="saveService" :loading="busy.service">保存设置</el-button>
-                </el-form-item>
-              </el-form>
-            </el-card>
-          </el-tab-pane>
-
-          <!-- 日志 -->
-          <el-tab-pane label="日志" name="logs">
-            <el-card shadow="never">
-              <template #header>
-                <div class="card-head">
-                  <span>打印服务日志</span>
-                  <el-button @click="refresh">刷新</el-button>
+        <!-- 设置 -->
+        <section v-show="tab === 'settings'">
+          <h1 class="page-title">设置</h1>
+          <p class="page-sub">修改后点击保存即时生效</p>
+          <div class="panel">
+            <el-form label-width="130px" label-position="left">
+              <el-form-item label="Web 端口"><el-input-number v-model="serviceForm.webPort" :min="1" :max="65535" controls-position="right" /></el-form-item>
+              <el-form-item label="打印端口"><el-input-number v-model="serviceForm.port" :min="1" :max="65535" controls-position="right" /></el-form-item>
+              <el-form-item label="访问令牌">
+                <el-input v-model="serviceForm.token" placeholder="Web 与打印服务之间的令牌（可留空）" />
+              </el-form-item>
+              <el-form-item label="LibreOffice">
+                <div class="input-row">
+                  <el-input v-model="serviceForm.sofficePath" placeholder="留空自动探测" />
+                  <el-button @click="pickSoffice">浏览</el-button>
                 </div>
-              </template>
-              <pre class="logs">{{ serviceLogs || '暂无日志' }}</pre>
-            </el-card>
-          </el-tab-pane>
-        </el-tabs>
-      </el-main>
-    </el-container>
+              </el-form-item>
+              <el-form-item label="开机自动启动"><el-switch v-model="serviceForm.autoStart" /></el-form-item>
+              <el-form-item label="数据目录"><span class="mono muted">{{ state.dataDir }}</span></el-form-item>
+              <el-form-item>
+                <el-button type="primary" @click="saveService" :loading="busy.service">保存设置</el-button>
+              </el-form-item>
+            </el-form>
+          </div>
+        </section>
+
+        <!-- 关于 -->
+        <section v-show="tab === 'about'">
+          <h1 class="page-title">关于</h1>
+          <p class="page-sub">WebPrint 打印助手</p>
+          <div class="about-card">
+            <img class="about-icon" src="../build/icon.png" alt="icon" />
+            <div class="about-name">{{ state.about.name || 'WebPrint 打印助手' }}</div>
+            <div class="about-version">版本 {{ state.about.version }} · {{ state.about.license }}</div>
+            <div class="about-desc">自托管的网页打印系统：网页上传 → 本机打印，支持账号/配额、任务队列与 Cloudflare Tunnel。本版本已完全脱离 Docker，一体化运行。</div>
+            <div class="about-repo">
+              <span class="muted">仓库地址</span>
+              <span class="mono link" @click="openExternal(state.about.repo)">{{ state.about.repo }}</span>
+            </div>
+            <div class="about-actions">
+              <el-button type="primary" @click="openExternal(state.about.repo)">打开仓库</el-button>
+              <el-button @click="openExternal(state.about.repo + '/issues')">问题反馈</el-button>
+              <el-button @click="openExternal(state.about.repo + '/releases')">检查更新</el-button>
+              <el-button @click="openExternal(state.about.repo + '/blob/main/LICENSE')">开源协议</el-button>
+            </div>
+            <div class="about-meta">
+              <div><span class="muted">Electron</span>{{ state.about.electron }}</div>
+              <div><span class="muted">Chromium</span>{{ state.about.chrome }}</div>
+              <div><span class="muted">Node.js</span>{{ state.about.node }}</div>
+              <div><span class="muted">平台</span>{{ state.about.platform }}</div>
+            </div>
+            <div class="about-copy">Copyright (c) 2026 miralexand · Mulan PSL v2</div>
+          </div>
+        </section>
+      </main>
+    </div>
   </div>
 
   <script src="vendor/vue.global.prod.js"></script>

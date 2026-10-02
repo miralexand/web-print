@@ -1,8 +1,8 @@
 {
   "name": "web-print-tray",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
-  "description": "Windows 打印助手：内置本地打印服务与 Cloudflare Tunnel 管理，托盘常驻，可打包为 exe。",
+  "description": "WebPrint 打印助手：一体化桌面应用，内置网页打印服务、本地打印代理与 Cloudflare Tunnel，无需 Docker。",
   "author": {
     "name": "miralexand",
     "email": "dalingaixidelu@163.com"
@@ -10,13 +10,15 @@
   "license": "MulanPSL-2.0",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
+    "start": "node scripts/copy-server.js && node scripts/copy-vendor.js && electron .",
     "vendor": "node scripts/copy-vendor.js",
-    "dist": "electron-builder --win nsis zip --publish never",
-    "pack": "electron-builder --win --dir --publish never"
+    "bundle": "node scripts/copy-server.js && node scripts/copy-vendor.js",
+    "dist": "node scripts/copy-server.js && node scripts/copy-vendor.js && electron-builder --win nsis zip --publish never",
+    "pack": "node scripts/copy-server.js && node scripts/copy-vendor.js && electron-builder --win --dir --publish never"
   },
   "dependencies": {
     "express": "^4.21.2",
+    "express-session": "^1.18.1",
     "multer": "^2.0.1",
     "pdf-to-printer": "^5.6.0"
   },
@@ -38,6 +40,7 @@
       "main.js",
       "preload.js",
       "lib/**/*",
+      "server/**/*",
       "renderer/**/*",
       "build/**/*"
     ],

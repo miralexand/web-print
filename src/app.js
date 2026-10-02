@@ -70,26 +70,66 @@ app.use((err, req, res, next) => {
   return res.status(500).json({ error: '服务器内部错误' });
 });
 
-userStore.load();
-limiter.load();
-queue.load();
+let httpServer = null;
+let storesLoaded = false;
 
-const server = app.listen(config.port, '0.0.0.0', () => {
-  logger.info(`web-print 已启动，监听 0.0.0.0:${config.port}`);
-  logger.info(`游客打印配额：每 ${config.anonWindowHours} 小时 ${config.anonPrintLimit} 次`);
-  if (!process.env.AUTH_PASS) {
-    logger.warn('未设置 AUTH_PASS 环境变量，初始管理员密码为默认值，请登录后尽快修改！');
-  }
-});
-
-function shutdown(signal) {
-  logger.info(`收到 ${signal}，正在关闭服务...`);
-  limiter.flush();
-  server.close(() => process.exit(0));
-  setTimeout(() => process.exit(0), 3000).unref();
+function loadStores() {
+  if (storesLoaded) return;
+  userStore.load();
+  limiter.load();
+  queue.load();
+  storesLoaded = true;
 }
 
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+/**
+ * 启动 Web 服务。
+ * @param {{ port?: number, host?: string }} [options]
+ * @returns {Promise<import('http').Server>}
+ */
+function start(options = {}) {
+  loadStores();
+  if (httpServer) return Promise.resolve(httpServer);
+  const port = Number(options.port) || config.port;
+  const host = options.host || '0.0.0.0';
+  return new Promise((resolve, reject) => {
+    const server = app.listen(port, host, () => {
+      httpServer = server;
+      logger.info(`web-print 已启动，监听 ${host}:${port}`);
+      logger.info(`游客打印配额：每 ${config.anonWindowHours} 小时 ${config.anonPrintLimit} 次`);
+      if (!process.env.AUTH_PASS) {
+        logger.warn('未设置 AUTH_PASS 环境变量，初始管理员密码为默认值，请登录后尽快修改！');
+      }
+      resolve(server);
+    });
+    server.on('error', (err) => {
+      httpServer = null;
+      reject(err);
+    });
+  });
+}
 
-module.exports = app;
+function stop() {
+  return new Promise((resolve) => {
+    if (!httpServer) return resolve();
+    const server = httpServer;
+    httpServer = null;
+    server.close(() => resolve());
+  });
+}
+
+if (require.main === module) {
+  start().catch((err) => {
+    logger.error('启动失败', err);
+    process.exit(1);
+  });
+  const shutdown = (signal) => {
+    logger.info(`收到 ${signal}，正在关闭服务...`);
+    limiter.flush();
+    stop().then(() => process.exit(0));
+    setTimeout(() => process.exit(0), 3000).unref();
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+}
+
+module.exports = { app, start, stop };

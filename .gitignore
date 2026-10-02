@@ -6,5 +6,6 @@ tmp/*
 data/*
 !data/.gitkeep
 desktop/release/
+desktop/server/
 .env
 *.log

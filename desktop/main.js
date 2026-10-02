@@ -2,21 +2,32 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { app, BrowserWindow, Tray, Menu, ipcMain, shell, dialog, nativeImage, net } = require('electron');
 const { PrintService, findSoffice } = require('./lib/printService');
 const { CloudflaredManager, findCloudflared } = require('./lib/cloudflared');
 
+const REPO_URL = 'https://github.com/miralexand/web-print';
+const LICENSE_NAME = 'MulanPSL-2.0';
 const CLOUDFLARED_DOWNLOAD = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe';
 
 let mainWindow = null;
 let tray = null;
 let service = null;
+let webModule = null;
+let webConfig = null;
+let webRunning = false;
 let cloudflared = null;
 let quitting = false;
 
 let config = {
   port: 8081,
+  webPort: 3000,
+  webHost: '127.0.0.1',
   token: '',
+  webUser: 'admin',
+  webPass: 'admin123',
+  sessionSecret: '',
   sofficePath: '',
   autoStart: false,
   cloudflare: {
@@ -28,11 +39,9 @@ let config = {
   },
 };
 
-// ---------- 路径（兼容便携版）----------
+// ---------- 路径（兼容便携/绿色版）----------
 function dataDir() {
-  // 便携版：配置与数据保存在 exe 同目录，随程序携带
   if (process.env.PORTABLE_EXECUTABLE_DIR) return process.env.PORTABLE_EXECUTABLE_DIR;
-  // 绿色版：在 exe 同目录放置 portable.flag 即启用便携模式
   try {
     const exeDir = path.dirname(process.execPath);
     if (fs.existsSync(path.join(exeDir, 'portable.flag'))) return exeDir;
@@ -44,6 +53,17 @@ function dataDir() {
 
 function configFile() {
   return path.join(dataDir(), 'webprint-config.json');
+}
+
+function logLine(...args) {
+  const line = `[${new Date().toISOString()}] ${args.join(' ')}`;
+  console.log(line);
+  try {
+    fs.mkdirSync(dataDir(), { recursive: true });
+    fs.appendFileSync(path.join(dataDir(), 'desktop.log'), line + '\n', 'utf8');
+  } catch (_) {
+    /* ignore */
+  }
 }
 
 function autoStartExecPath() {
@@ -79,6 +99,13 @@ function loadConfig() {
   } catch (_) {
     /* 使用默认配置 */
   }
+  if (!config.sessionSecret) {
+    config.sessionSecret = crypto.randomBytes(24).toString('hex');
+    saveConfig();
+  }
+  if (!config.cloudflare.url || config.cloudflare.url === 'http://127.0.0.1:3000') {
+    config.cloudflare.url = `http://127.0.0.1:${config.webPort}`;
+  }
 }
 
 function saveConfig() {
@@ -90,7 +117,7 @@ function saveConfig() {
   }
 }
 
-// ---------- 打印服务 ----------
+// ---------- 打印服务（Agent）----------
 function buildService() {
   return new PrintService({
     host: '127.0.0.1',
@@ -103,6 +130,50 @@ function buildService() {
 async function ensureService() {
   if (!service) service = buildService();
   return service;
+}
+
+// ---------- 内嵌 Web 服务 ----------
+function setupWebEnv() {
+  const base = path.join(dataDir(), 'web');
+  process.env.PORT = String(config.webPort);
+  process.env.HOST_PRINT_API = `http://127.0.0.1:${config.port}`;
+  process.env.HOST_PRINT_TOKEN = config.token || '';
+  process.env.DATA_FOLDER = path.join(base, 'data');
+  process.env.LOG_FOLDER = path.join(base, 'logs');
+  process.env.TMP_FOLDER = path.join(base, 'tmp');
+  process.env.AUTH_USER = config.webUser || 'admin';
+  process.env.AUTH_PASS = config.webPass || 'admin123';
+  process.env.SESSION_SECRET = config.sessionSecret;
+  process.env.TRUST_PROXY = '1';
+}
+
+function ensureWebModule() {
+  if (!webModule) {
+    setupWebEnv();
+    // eslint-disable-next-line global-require
+    webModule = require('./server/app');
+    // eslint-disable-next-line global-require
+    webConfig = require('./server/config');
+  }
+  return webModule;
+}
+
+async function startWeb() {
+  const mod = ensureWebModule();
+  // 打印服务端口/令牌变化时同步给 Web 服务
+  if (webConfig) {
+    webConfig.hostPrintApi = `http://127.0.0.1:${config.port}`;
+    webConfig.hostPrintToken = config.token || '';
+  }
+  await mod.start({ port: config.webPort, host: config.webHost });
+  webRunning = true;
+}
+
+async function stopWeb() {
+  if (webModule) {
+    await webModule.stop().catch(() => {});
+  }
+  webRunning = false;
 }
 
 // ---------- 云隧道 ----------
@@ -147,14 +218,16 @@ function downloadFile(url, dest, redirects = 6) {
 // ---------- 窗口 ----------
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 900,
-    height: 720,
-    minWidth: 720,
-    minHeight: 560,
+    width: 980,
+    height: 740,
+    minWidth: 780,
+    minHeight: 580,
     title: 'WebPrint 打印助手',
     icon: buildResource('icon.png'),
     autoHideMenuBar: true,
-    backgroundColor: '#f5f7fa',
+    backgroundColor: '#f5f5f7',
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#f5f5f7', symbolColor: '#1d1d1f', height: 52 },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -198,34 +271,44 @@ function createTray() {
 
 function updateTrayMenu() {
   if (!tray) return;
-  const running = !!(service && service.running);
-  const tunnel = cloudflared ? cloudflared.state() : { running: false };
-  tray.setToolTip(`WebPrint 打印助手 - 服务${running ? '运行中' : '已停止'} / 隧道${tunnel.running ? '运行中' : '已停止'}`);
+  const agentOn = !!(service && service.running);
+  const tunnelOn = cloudflared ? cloudflared.state().running : false;
+  tray.setToolTip(`WebPrint - Web${webRunning ? '开' : '关'} / 打印${agentOn ? '开' : '关'} / 隧道${tunnelOn ? '开' : '关'}`);
   const menu = Menu.buildFromTemplate([
-    { label: `打印服务：${running ? '运行中' : '已停止'}`, enabled: false },
-    { label: `Cloudflare 隧道：${tunnel.running ? '运行中' : '已停止'}`, enabled: false },
+    { label: `Web 服务：${webRunning ? '运行中' : '已停止'}`, enabled: false },
+    { label: `打印服务：${agentOn ? '运行中' : '已停止'}`, enabled: false },
+    { label: `Cloudflare 隧道：${tunnelOn ? '运行中' : '已停止'}`, enabled: false },
     { type: 'separator' },
     { label: '显示主界面', click: showWindow },
     {
-      label: running ? '停止打印服务' : '启动打印服务',
+      label: webRunning ? '停止 Web 服务' : '启动 Web 服务',
       click: async () => {
-        if (running) await service.stop();
+        if (webRunning) await stopWeb();
+        else await startWeb().catch(() => {});
+        updateTrayMenu();
+        broadcastState();
+      },
+    },
+    {
+      label: agentOn ? '停止打印服务' : '启动打印服务',
+      click: async () => {
+        if (agentOn) await service.stop();
         else await (await ensureService()).start();
         updateTrayMenu();
         broadcastState();
       },
     },
     {
-      label: tunnel.running ? '停止 Cloudflare 隧道' : '启动 Cloudflare 隧道',
+      label: tunnelOn ? '停止 Cloudflare 隧道' : '启动 Cloudflare 隧道',
       click: async () => {
         const mgr = await ensureCloudflared();
-        if (tunnel.running) mgr.stop();
+        if (tunnelOn) mgr.stop();
         else mgr.start();
         updateTrayMenu();
         broadcastState();
       },
     },
-    { label: '打开 Web 打印界面', click: () => shell.openExternal('http://127.0.0.1:3000') },
+    { label: '打开 Web 打印界面', click: () => shell.openExternal(webUrl()) },
     { type: 'separator' },
     {
       label: '退出',
@@ -237,6 +320,10 @@ function updateTrayMenu() {
     },
   ]);
   tray.setContextMenu(menu);
+}
+
+function webUrl() {
+  return `http://127.0.0.1:${config.webPort}`;
 }
 
 function broadcastState() {
@@ -257,7 +344,25 @@ function publicState() {
     portable: !!process.env.PORTABLE_EXECUTABLE_DIR,
     dataDir: dataDir(),
     logs: service ? service.logs.slice(-60) : [],
+    web: {
+      running: webRunning,
+      host: config.webHost,
+      port: config.webPort,
+      url: webUrl(),
+      adminUser: config.webUser,
+    },
     cloudflare: cloudflared ? cloudflared.state() : null,
+    about: {
+      name: 'WebPrint 打印助手',
+      productName: 'WebPrintTray',
+      version: app.getVersion(),
+      repo: REPO_URL,
+      license: LICENSE_NAME,
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      platform: `${process.platform} ${process.arch}`,
+    },
   };
 }
 
@@ -271,15 +376,15 @@ function applyAutoStart() {
 
 async function shutdown() {
   if (cloudflared) cloudflared.dispose();
-  if (service && service.running) {
-    await service.stop().catch(() => {});
-  }
+  await stopWeb();
+  if (service && service.running) await service.stop().catch(() => {});
 }
 
 // ---------- IPC ----------
 function registerIpc() {
   ipcMain.handle('state:get', () => publicState());
 
+  // 打印服务
   ipcMain.handle('service:start', async () => {
     try {
       await (await ensureService()).start();
@@ -289,37 +394,68 @@ function registerIpc() {
     updateTrayMenu();
     return { ok: true, state: publicState() };
   });
-
   ipcMain.handle('service:stop', async () => {
     if (service) await service.stop();
     updateTrayMenu();
     return { ok: true, state: publicState() };
   });
-
   ipcMain.handle('service:printers', async () => {
     try {
-      const printers = await (await ensureService()).listPrinters();
-      return { ok: true, printers };
+      return { ok: true, printers: await (await ensureService()).listPrinters() };
     } catch (err) {
       return { ok: false, error: err.message, printers: [] };
     }
   });
 
+  // Web 服务
+  ipcMain.handle('web:start', async () => {
+    try {
+      await startWeb();
+    } catch (err) {
+      return { ok: false, error: `Web 服务启动失败：${err.message}` };
+    }
+    updateTrayMenu();
+    return { ok: true, state: publicState() };
+  });
+  ipcMain.handle('web:stop', async () => {
+    await stopWeb();
+    updateTrayMenu();
+    return { ok: true, state: publicState() };
+  });
+
+  // 配置
   ipcMain.handle('config:save', async (event, patch) => {
-    const wasRunning = service && service.running;
+    const wasAgent = service && service.running;
+    const wasWeb = webRunning;
     if (patch.port !== undefined) config.port = Number.parseInt(patch.port, 10) || 8081;
+    if (patch.webPort !== undefined) config.webPort = Number.parseInt(patch.webPort, 10) || 3000;
     if (patch.token !== undefined) config.token = String(patch.token || '');
     if (patch.sofficePath !== undefined) config.sofficePath = String(patch.sofficePath || '');
     if (patch.autoStart !== undefined) config.autoStart = !!patch.autoStart;
     saveConfig();
     applyAutoStart();
+
     if (service) await service.stop().catch(() => {});
     service = buildService();
-    if (wasRunning) await service.start().catch(() => {});
+    if (wasAgent) await service.start().catch(() => {});
+
+    if (webConfig) {
+      webConfig.hostPrintApi = `http://127.0.0.1:${config.port}`;
+      webConfig.hostPrintToken = config.token || '';
+    }
+    if (wasWeb) {
+      await stopWeb();
+      await startWeb().catch(() => {});
+    }
+    if (cloudflared) {
+      config.cloudflare.url = config.cloudflare.url || `http://127.0.0.1:${config.webPort}`;
+      cloudflared.setConfig(config.cloudflare);
+    }
     updateTrayMenu();
     return { ok: true, state: publicState() };
   });
 
+  // Cloudflare 隧道
   ipcMain.handle('cloudflare:save', async (event, patch) => {
     config.cloudflare = { ...config.cloudflare, ...(patch || {}) };
     saveConfig();
@@ -335,7 +471,6 @@ function registerIpc() {
     updateTrayMenu();
     return { ok: true, state: publicState() };
   });
-
   ipcMain.handle('cloudflare:start', async () => {
     const mgr = await ensureCloudflared();
     mgr.setConfig(config.cloudflare);
@@ -343,13 +478,11 @@ function registerIpc() {
     updateTrayMenu();
     return { ok: true, state: publicState() };
   });
-
   ipcMain.handle('cloudflare:stop', async () => {
     if (cloudflared) cloudflared.stop();
     updateTrayMenu();
     return { ok: true, state: publicState() };
   });
-
   ipcMain.handle('cloudflare:pick', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: '选择 cloudflared.exe',
@@ -359,7 +492,6 @@ function registerIpc() {
     if (result.canceled || !result.filePaths.length) return { ok: false };
     return { ok: true, path: result.filePaths[0] };
   });
-
   ipcMain.handle('cloudflare:download', async () => {
     try {
       const dest = path.join(dataDir(), 'cloudflared.exe');
@@ -372,7 +504,6 @@ function registerIpc() {
       return { ok: false, error: `下载 cloudflared 失败：${err.message}` };
     }
   });
-
   ipcMain.handle('cloudflare:open-download', async () => {
     await shell.openExternal('https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/');
   });
@@ -387,18 +518,13 @@ function registerIpc() {
     return { ok: true, path: result.filePaths[0] };
   });
 
-  ipcMain.handle('app:open-web', async () => {
-    await shell.openExternal('http://127.0.0.1:3000');
-  });
-
+  ipcMain.handle('app:open-web', async () => shell.openExternal(webUrl()));
   ipcMain.handle('app:open-external', async (event, url) => {
     if (/^https?:\/\//i.test(url)) await shell.openExternal(url);
   });
-
   ipcMain.handle('app:hide', () => {
     if (mainWindow) mainWindow.hide();
   });
-
   ipcMain.handle('app:quit', async () => {
     quitting = true;
     await shutdown();
@@ -421,16 +547,21 @@ if (!gotLock) {
     createWindow();
     createTray();
 
+    // 一体化启动：打印服务 + Web 服务
     try {
       await (await ensureService()).start();
     } catch (err) {
+      logLine('打印服务启动失败:', err && err.stack ? err.stack : err);
       dialog.showErrorBox('打印服务启动失败', `${err.message}\n\n请在界面中修改端口或令牌后重试。`);
     }
-
-    if (config.cloudflare.autoStart) {
-      cloudflared.start();
+    try {
+      await startWeb();
+      logLine(`Web 服务已启动：http://${config.webHost}:${config.webPort}`);
+    } catch (err) {
+      logLine('Web 服务启动失败:', err && err.stack ? err.stack : err);
+      dialog.showErrorBox('Web 服务启动失败', `${(err && err.message) || err}\n\n请在界面中修改 Web 端口后重试。`);
     }
-
+    if (config.cloudflare.autoStart) cloudflared.start();
     updateTrayMenu();
   });
 

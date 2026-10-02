@@ -8,6 +8,14 @@ const app = createApp({
     const tab = ref('overview');
     const initialized = ref(false);
 
+    const nav = [
+      { key: 'overview', label: '概览', icon: '🌿' },
+      { key: 'printers', label: '打印机', icon: '🖨️' },
+      { key: 'tunnel', label: 'Cloudflare 隧道', icon: '☁️' },
+      { key: 'settings', label: '设置', icon: '⚙️' },
+      { key: 'about', label: '关于', icon: 'ℹ️' },
+    ];
+
     const state = reactive({
       running: false,
       host: '127.0.0.1',
@@ -18,6 +26,8 @@ const app = createApp({
       portable: false,
       dataDir: '',
       logs: [],
+      web: { running: false, host: '127.0.0.1', port: 3000, url: '', adminUser: 'admin' },
+      about: {},
     });
 
     const tunnel = reactive({
@@ -33,16 +43,18 @@ const app = createApp({
     });
 
     const printers = ref([]);
-    const busy = reactive({ service: false, printers: false, tunnel: false, download: false });
-
-    const serviceForm = reactive({ port: 8081, token: '', sofficePath: '', autoStart: false });
+    const busy = reactive({ service: false, web: false, printers: false, tunnel: false, download: false });
+    const serviceForm = reactive({ port: 8081, webPort: 3000, token: '', sofficePath: '', autoStart: false });
     const tunnelForm = reactive({ mode: 'quick', url: 'http://127.0.0.1:3000', token: '', cloudflaredPath: '', autoStart: false });
 
     const serviceLogs = computed(() => (state.logs || []).join('\n'));
     const tunnelLogs = computed(() => (tunnel.logs || []).join('\n'));
+    const tunnelRunning = computed(() => tunnel.running);
+    const allRunning = computed(() => state.web.running && state.running);
 
     function initForms(s) {
       serviceForm.port = s.port;
+      serviceForm.webPort = s.web ? s.web.port : 3000;
       serviceForm.token = s.token || '';
       serviceForm.sofficePath = s.sofficePath || '';
       serviceForm.autoStart = !!s.autoStart;
@@ -66,6 +78,8 @@ const app = createApp({
       state.portable = s.portable;
       state.dataDir = s.dataDir;
       state.logs = s.logs || [];
+      if (s.web) Object.assign(state.web, s.web);
+      if (s.about) state.about = s.about;
       if (s.cloudflare) {
         tunnel.running = s.cloudflare.running;
         tunnel.url = s.cloudflare.url;
@@ -109,9 +123,21 @@ const app = createApp({
         const res = state.running ? await window.trayApi.stop() : await window.trayApi.start();
         if (res && res.state) syncState(res.state);
         if (res && res.ok === false) ElMessage.error(res.error);
-        else ElMessage.success(state.running ? '服务已启动' : '服务已停止');
+        else ElMessage.success(state.running ? '打印服务已启动' : '打印服务已停止');
       } finally {
         busy.service = false;
+      }
+    }
+
+    async function toggleWeb() {
+      busy.web = true;
+      try {
+        const res = state.web.running ? await window.trayApi.webStop() : await window.trayApi.webStart();
+        if (res && res.state) syncState(res.state);
+        if (res && res.ok === false) ElMessage.error(res.error);
+        else ElMessage.success(state.web.running ? 'Web 服务已启动' : 'Web 服务已停止');
+      } finally {
+        busy.web = false;
       }
     }
 
@@ -134,9 +160,7 @@ const app = createApp({
     async function saveTunnel(start) {
       busy.tunnel = true;
       try {
-        if (start) {
-          await window.trayApi.tunnelStop();
-        }
+        if (start) await window.trayApi.tunnelStop();
         const res = await window.trayApi.tunnelSave({ ...tunnelForm });
         if (!res.ok) {
           ElMessage.error(res.error || '保存失败');
@@ -150,6 +174,16 @@ const app = createApp({
           syncState(res.state);
           ElMessage.success('隧道配置已保存');
         }
+      } finally {
+        busy.tunnel = false;
+      }
+    }
+
+    async function startTunnel() {
+      busy.tunnel = true;
+      try {
+        const res = await window.trayApi.tunnelStart();
+        if (res && res.state) syncState(res.state);
       } finally {
         busy.tunnel = false;
       }
@@ -196,15 +230,12 @@ const app = createApp({
     function openWeb() {
       window.trayApi.openWeb();
     }
-
     function openDownloadPage() {
       window.trayApi.tunnelOpenDownload();
     }
-
     function openExternal(url) {
-      window.trayApi.openExternal(url);
+      if (url) window.trayApi.openExternal(url);
     }
-
     function hideToTray() {
       window.trayApi.hide();
     }
@@ -226,6 +257,7 @@ const app = createApp({
 
     return {
       tab,
+      nav,
       state,
       tunnel,
       printers,
@@ -234,12 +266,16 @@ const app = createApp({
       tunnelForm,
       serviceLogs,
       tunnelLogs,
+      tunnelRunning,
+      allRunning,
       refresh,
       refreshAll,
       loadPrinters,
       toggleService,
+      toggleWeb,
       saveService,
       saveTunnel,
+      startTunnel,
       stopTunnel,
       pickCloudflared,
       pickSoffice,

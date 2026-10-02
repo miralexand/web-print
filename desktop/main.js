@@ -238,6 +238,23 @@ function createWindow() {
   });
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
+  mainWindow.webContents.on('console-message', (event, level, message) => {
+    if (level >= 3) logLine('渲染层错误:', message);
+  });
+
+  if (process.env.WEBPRINT_DEBUG === '1') {
+    mainWindow.webContents.on('did-finish-load', async () => {
+      try {
+        const info = await mainWindow.webContents.executeJavaScript(
+          "Array.from(document.querySelectorAll('main section')).map(s => ({ title: (s.querySelector('h1')||{}).textContent || '?', len: s.innerHTML.length, shown: getComputedStyle(s).display }))"
+        );
+        logLine('渲染诊断:', JSON.stringify(info));
+      } catch (err) {
+        logLine('渲染诊断失败:', err.message);
+      }
+    });
+  }
+
   mainWindow.on('close', (event) => {
     if (!quitting) {
       event.preventDefault();

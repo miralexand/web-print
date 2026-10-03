@@ -4,6 +4,7 @@
  * Cloudflare Tunnel 管理。
  * 支持三种运行方式：
  *   - quick：cloudflared tunnel --url <目标地址>，解析 trycloudflare 公网地址
+ *            可随时关闭（stop）或刷新重建（restart，会得到一个新的公网地址）
  *   - token：cloudflared tunnel run --token <token>（应用内启动连接器）
  *   - 兼容已用 `cloudflared service install <token>` 安装的 Windows 系统服务：
  *       检测到服务在运行时，应用不会重复启动，避免连接器/端口冲突报错
@@ -14,6 +15,7 @@ const path = require('path');
 const { spawn, execFile } = require('child_process');
 
 const URL_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/gi;
+const QUICK_URL_WAIT_MS = 30000;
 
 function findCloudflared(extra) {
   const candidates = [
@@ -78,12 +80,14 @@ class CloudflaredManager {
     };
     this.proc = null;
     this.running = false;
+    this.starting = false;
     this.managedByService = false;
     this.url = '';
     this.error = '';
     this.logs = [];
     this.serviceStatus = { installed: false, running: false };
     this.onChange = options.onChange || (() => {});
+    this._urlTimer = null;
     this._poll = setInterval(() => this.refreshService(), 5000);
   }
 
@@ -103,6 +107,7 @@ class CloudflaredManager {
   state() {
     return {
       running: this.running,
+      starting: this.starting,
       url: this.url,
       error: this.error,
       logs: this.logs.slice(-100),
@@ -124,26 +129,37 @@ class CloudflaredManager {
     const next = await queryCloudflaredService();
     const changed = next.installed !== this.serviceStatus.installed || next.running !== this.serviceStatus.running;
     this.serviceStatus = next;
-    if (next.running) {
-      if (!this.managedByService) {
-        this.managedByService = true;
-        this.running = true;
-        this.log('检测到 cloudflared 已作为 Windows 系统服务运行，应用将不再重复启动。');
+    // 仅命名隧道(token)模式才与系统服务互斥；快速隧道不受影响
+    if (this.config.mode === 'token') {
+      if (next.running) {
+        if (!this.managedByService) {
+          this.managedByService = true;
+          this.running = true;
+          this.log('检测到 cloudflared 已作为 Windows 系统服务运行，应用将不再重复启动。');
+        }
+      } else if (this.managedByService && !this.proc) {
+        this.managedByService = false;
+        this.running = false;
       }
-    } else if (this.managedByService && !this.proc) {
-      this.managedByService = false;
-      this.running = false;
     }
     if (changed) this.onChange();
     return this.serviceStatus;
   }
 
+  clearUrlTimer() {
+    if (this._urlTimer) {
+      clearTimeout(this._urlTimer);
+      this._urlTimer = null;
+    }
+  }
+
   async start() {
     this.error = '';
     this.url = '';
-    await this.refreshService();
+    this.clearUrlTimer();
 
     if (this.config.mode === 'token') {
+      await this.refreshService();
       const token = normalizeToken(this.config.token);
       this.config.token = token;
       if (!token) {
@@ -176,13 +192,27 @@ class CloudflaredManager {
     } catch (err) {
       this.error = `无法启动 cloudflared：${err.message}`;
       this.running = false;
+      this.starting = false;
       this.onChange();
       return this.state();
     }
 
     this.running = true;
+    this.starting = true;
     this.managedByService = false;
+    this.spawnFailed = false;
     this.onChange();
+
+    // 快速隧道等待公网地址；超时给出提示（保持运行，可能是网络较慢）
+    if (this.config.mode === 'quick') {
+      this._urlTimer = setTimeout(() => {
+        if (this.running && !this.url) {
+          this.starting = false;
+          this.log('尚未获取到公网地址，请检查本机是否能访问互联网，或点击「刷新重建」重试。');
+          this.onChange();
+        }
+      }, QUICK_URL_WAIT_MS);
+    }
 
     const handle = (chunk) => {
       const text = chunk.toString();
@@ -190,6 +220,8 @@ class CloudflaredManager {
       const matches = text.match(URL_RE);
       if (matches && matches.length) {
         this.url = matches[matches.length - 1];
+        this.starting = false;
+        this.clearUrlTimer();
         this.onChange();
       }
     };
@@ -198,16 +230,30 @@ class CloudflaredManager {
     this.proc.stderr.on('data', handle);
 
     this.proc.on('error', (err) => {
-      this.error = `cloudflared 运行错误：${err.message}（请检查路径或是否已安装）`;
+      this.spawnFailed = true;
+      this.error = err && err.code === 'ENOENT'
+        ? '未找到 cloudflared，请点击「下载」自动获取，或用「浏览」指定 cloudflared.exe 路径。'
+        : `cloudflared 运行错误：${err.message}`;
       this.running = false;
+      this.starting = false;
+      this.clearUrlTimer();
       this.onChange();
     });
 
     this.proc.on('close', (code) => {
+      const wasQuick = this.config.mode === 'quick';
       this.running = false;
+      this.starting = false;
       this.proc = null;
-      if (code !== 0 && !this.url) {
-        this.error = `cloudflared 已退出（退出码 ${code}），请查看下方日志。常见原因：Token 无效、隧道未配置 Public Hostname，或已被系统服务占用。`;
+      this.clearUrlTimer();
+      if (!this.spawnFailed) {
+        if (code !== 0 && !this.url) {
+          this.error = wasQuick
+            ? '快速隧道未能建立（可能无法访问互联网或被网络限制），请点击「刷新重建」重试。'
+            : `cloudflared 已退出（退出码 ${code}），请查看下方日志。常见原因：Token 无效、隧道未配置 Public Hostname，或网络不可用。`;
+        } else if (wasQuick && !this.url) {
+          this.error = '快速隧道未生成公网地址，请点击「刷新重建」重试。';
+        }
       }
       this.log(`cloudflared 已退出，退出码 ${code}`);
       this.onChange();
@@ -217,6 +263,8 @@ class CloudflaredManager {
   }
 
   stop() {
+    this.clearUrlTimer();
+    this.starting = false;
     if (this.managedByService && !this.proc) {
       this.log('隧道由 Windows 系统服务托管，已停止应用内管理；如需彻底停止请在服务管理器停止 cloudflared 服务，或点击“卸载系统服务”。');
       this.managedByService = false;
@@ -241,8 +289,16 @@ class CloudflaredManager {
     }
     this.running = false;
     this.proc = null;
+    this.url = '';
     this.onChange();
     return this.state();
+  }
+
+  /** 刷新重建：关闭当前隧道并重新建立（快速隧道会得到新的公网地址） */
+  async restart() {
+    this.stop();
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    return this.start();
   }
 
   /** 以 Windows 服务方式安装并接管隧道（需要管理员权限） */

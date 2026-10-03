@@ -81,7 +81,7 @@
 
             <div class="stat-card">
               <div class="stat-head"><span class="stat-name">Cloudflare 隧道</span><span class="dot" :class="tunnel.running ? 'on' : 'off'"></span></div>
-              <div class="stat-value">{{ tunnel.running ? (tunnel.url || '运行中（命名隧道）') : '未启动' }}</div>
+              <div class="stat-value">{{ tunnel.running ? (tunnel.url || (tunnel.starting ? '启动中…' : '运行中（命名隧道）')) : '未启动' }}</div>
               <div class="stat-desc">{{ tunnel.running ? (tunnel.managedByService ? '隧道由系统服务托管，运行中' : '已启动，可在隧道页查看详情') : '将本地 Web 服务安全发布到公网' }}</div>
               <div class="stat-actions">
                 <el-button :type="tunnel.running ? 'default' : 'primary'" size="small" @click="tunnel.running ? stopTunnel() : startTunnel()" :loading="busy.tunnel">
@@ -194,7 +194,9 @@
               <el-form-item>
                 <el-button type="primary" @click="saveTunnel(true)" :loading="busy.tunnel">保存并启动</el-button>
                 <el-button @click="saveTunnel(false)" :loading="busy.tunnel">仅保存</el-button>
-                <el-button @click="stopTunnel" :disabled="!tunnel.running">停止</el-button>
+                <el-button v-if="tunnelForm.mode === 'quick'" @click="restartTunnel" :disabled="!tunnel.running" :loading="busy.tunnel">刷新重建</el-button>
+                <el-button v-if="tunnelForm.mode === 'quick'" type="danger" plain @click="stopTunnel" :disabled="!tunnel.running">关闭快速隧道</el-button>
+                <el-button v-else @click="stopTunnel" :disabled="!tunnel.running">停止</el-button>
                 <el-button link type="primary" @click="openDownloadPage">下载页</el-button>
               </el-form-item>
               <el-form-item label="系统服务">
@@ -207,6 +209,14 @@
             <div v-if="tunnel.managedByService" class="notice ok">
               <span>检测到 cloudflared 已作为 Windows 系统服务运行，隧道由系统托管，应用不会重复启动连接器。</span>
               <span class="notice-actions"><el-button size="small" @click="uninstallService" :loading="busy.tunnel">卸载系统服务</el-button></span>
+            </div>
+
+            <div v-if="tunnelForm.mode === 'quick' && tunnel.running && !tunnel.url" class="notice info">
+              <span>{{ tunnel.starting ? '正在创建快速隧道，正在获取公网地址…' : '快速隧道运行中，但尚未获取到公网地址，可点击「刷新重建」重试。' }}</span>
+              <span class="notice-actions">
+                <el-button size="small" @click="restartTunnel" :loading="busy.tunnel">刷新重建</el-button>
+                <el-button size="small" type="danger" plain @click="stopTunnel">关闭</el-button>
+              </span>
             </div>
 
             <div v-if="tunnel.error" class="notice err">{{ tunnel.error }}</div>

@@ -359,6 +359,16 @@ function updateTrayMenu() {
         broadcastState();
       },
     },
+    {
+      label: '重建快速隧道',
+      visible: config.cloudflare.mode === 'quick' && tunnelOn,
+      click: async () => {
+        const mgr = await ensureCloudflared();
+        await mgr.restart();
+        updateTrayMenu();
+        broadcastState();
+      },
+    },
     { label: '打开 Web 打印界面', click: () => shell.openExternal(webUrl()) },
     { type: 'separator' },
     {
@@ -537,6 +547,13 @@ function registerIpc() {
   });
   ipcMain.handle('cloudflare:stop', async () => {
     if (cloudflared) cloudflared.stop();
+    updateTrayMenu();
+    return { ok: true, state: publicState() };
+  });
+  ipcMain.handle('cloudflare:restart', async () => {
+    const mgr = await ensureCloudflared();
+    mgr.setConfig(config.cloudflare);
+    await mgr.restart();
     updateTrayMenu();
     return { ok: true, state: publicState() };
   });

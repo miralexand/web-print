@@ -129,6 +129,7 @@ body {
 .notice { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 16px; border-radius: 15px; font-size: 12px; margin-top: 12px; }
 .notice.ok { background: #eefcf3; color: #0a7d43; border: 1px solid #c6f0d8; }
 .notice.err { background: #fdecec; color: #c0392b; border: 1px solid #f7c7c7; }
+.notice.info { background: #eef4fb; color: #0057b8; border: 1px solid #cfe2fb; }
 .notice-actions { display: flex; gap: 8px; }
 
 .logs {

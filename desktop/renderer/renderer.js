@@ -34,6 +34,7 @@ const app = createApp({
 
     const tunnel = reactive({
       running: false,
+      starting: false,
       url: '',
       error: '',
       logs: [],
@@ -89,6 +90,7 @@ const app = createApp({
       if (s.about) state.about = s.about;
       if (s.cloudflare) {
         tunnel.running = s.cloudflare.running;
+        tunnel.starting = !!s.cloudflare.starting;
         tunnel.url = s.cloudflare.url;
         tunnel.error = s.cloudflare.error;
         tunnel.logs = s.cloudflare.logs || [];
@@ -209,6 +211,17 @@ const app = createApp({
       }
     }
 
+    async function restartTunnel() {
+      busy.tunnel = true;
+      try {
+        const res = await window.trayApi.tunnelRestart();
+        if (res && res.state) syncState(res.state);
+        ElMessage.success('正在重建隧道，稍候将生成新的公网地址…');
+      } finally {
+        busy.tunnel = false;
+      }
+    }
+
     async function pickCloudflared() {
       const res = await window.trayApi.tunnelPick();
       if (res.ok) tunnelForm.cloudflaredPath = res.path;
@@ -320,6 +333,7 @@ const app = createApp({
       saveTunnel,
       startTunnel,
       stopTunnel,
+      restartTunnel,
       pickCloudflared,
       pickSoffice,
       installService,

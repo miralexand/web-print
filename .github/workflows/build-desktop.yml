@@ -67,4 +67,27 @@ jobs:
           files: |
             desktop/release/*.exe
             desktop/release/*.zip
-          generate_release_notes: true
+          body: |
+            ## WebPrint 打印助手 ${{ github.ref_name }}
+
+            一体化 Windows 桌面应用：内置 **网页打印服务**、**本地打印** 与 **Cloudflare Tunnel**，开箱即用。
+
+            ### 下载
+            - `WebPrintTray-Setup-*.exe`：安装版（推荐）
+            - `WebPrintTray-*-x64.zip`：免安装绿色版，解压后双击 `WebPrintTray.exe`
+
+            ### 快速上手
+            1. 运行程序，托盘出现图标，窗口自动打开
+            2. 点「打开 Web 打印界面」，或访问 `http://127.0.0.1:3000`（局域网用 `http://本机IP:3000`）
+            3. 默认账号 `admin / admin123`，登录后在「用户管理」中修改
+            4. Word / Excel / PPT 转 PDF：需本机安装 **WPS** 或 **Microsoft Office**（WPS 优先，Office 兜底）
+
+            ### 亮点
+            - Apple / 北欧极简双端 UI，图标统一，网页端与桌面端风格一致
+            - 游客配额（默认每 3 小时 5 次）与管理员用户管理
+            - 文档预览、起止页码、份数、任务删除、失败自动重试
+            - Cloudflare 快速/命名隧道；快速隧道支持关闭与刷新重建
+            - 局域网访问、托盘常驻、开机自启
+
+            > ⚠️ 公网访问前请阅读应用内免责声明：请勿通过公网隧道传输涉密/敏感文件（政企、涉密单位请遵守本单位保密规定）。
+            > 本程序未做代码签名，若被 SmartScreen / 杀毒软件误报，请参考仓库 README 的说明。

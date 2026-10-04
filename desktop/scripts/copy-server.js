@@ -1,6 +1,6 @@
 'use strict';
 
-/** 将仓库根目录的 Web 服务（src/）复制进 Electron 应用，实现完全脱离 Docker 的一体化运行 */
+/** 将仓库根目录的 Web 服务（src/）复制进 Electron 应用，实现一体化的本地运行 */
 
 const fs = require('fs');
 const path = require('path');

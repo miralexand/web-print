@@ -9,7 +9,6 @@ contextBridge.exposeInMainWorld('trayApi', {
   stop: () => ipcRenderer.invoke('service:stop'),
   getPrinters: () => ipcRenderer.invoke('service:printers'),
   saveConfig: (patch) => ipcRenderer.invoke('config:save', patch),
-  pickSoffice: () => ipcRenderer.invoke('dialog:pick-soffice'),
 
   webStart: () => ipcRenderer.invoke('web:start'),
   webStop: () => ipcRenderer.invoke('web:stop'),

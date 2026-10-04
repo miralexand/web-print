@@ -32,7 +32,7 @@ module.exports = {
   anonPrintLimit: int(process.env.ANON_PRINT_LIMIT, 5),
   anonWindowHours: num(process.env.ANON_WINDOW_HOURS, 3),
 
-  hostPrintApi: (process.env.HOST_PRINT_API || 'http://host.docker.internal:8081').replace(/\/+$/, ''),
+  hostPrintApi: (process.env.HOST_PRINT_API || 'http://127.0.0.1:8081').replace(/\/+$/, ''),
   hostPrintToken: process.env.HOST_PRINT_TOKEN || '',
   hostPrintTimeout: int(process.env.HOST_PRINT_TIMEOUT, 180000),
 

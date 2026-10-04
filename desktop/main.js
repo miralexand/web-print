@@ -6,7 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { app, BrowserWindow, Tray, Menu, ipcMain, shell, dialog, nativeImage, net } = require('electron');
-const { PrintService, findSoffice } = require('./lib/printService');
+const { PrintService } = require('./lib/printService');
 const { CloudflaredManager, findCloudflared } = require('./lib/cloudflared');
 
 const REPO_URL = 'https://github.com/miralexand/web-print';
@@ -31,9 +31,8 @@ let config = {
   webUser: 'admin',
   webPass: 'admin123',
   sessionSecret: '',
-  sofficePath: '',
   autoStart: false,
-  quickDisclaimerAccepted: false,
+  disclaimerDontRemind: false,
   cloudflare: {
     mode: 'quick',
     url: 'http://127.0.0.1:3000',
@@ -128,7 +127,6 @@ function buildService() {
     port: config.port,
     token: config.token,
     basePath: config.agentBasePath,
-    sofficePath: config.sofficePath || findSoffice(),
   });
 }
 
@@ -402,8 +400,7 @@ function publicState() {
     port: config.port,
     token: config.token,
     basePath: config.agentBasePath || '',
-    sofficePath: config.sofficePath || findSoffice(),
-    sofficeFound: service ? service.sofficeFound() : false,
+    converter: 'WPS 优先，Microsoft Office 兜底',
     autoStart: config.autoStart,
     portable: !!process.env.PORTABLE_EXECUTABLE_DIR,
     dataDir: dataDir(),
@@ -418,8 +415,8 @@ function publicState() {
       adminUser: config.webUser,
     },
     cloudflare: cloudflared
-      ? { ...cloudflared.state(), quickDisclaimerAccepted: !!config.quickDisclaimerAccepted }
-      : { quickDisclaimerAccepted: !!config.quickDisclaimerAccepted },
+      ? { ...cloudflared.state(), disclaimerDontRemind: !!config.disclaimerDontRemind }
+      : { disclaimerDontRemind: !!config.disclaimerDontRemind },
     about: {
       name: 'WebPrint 打印助手',
       productName: 'WebPrintTray',
@@ -500,7 +497,6 @@ function registerIpc() {
     if (patch.allowLan !== undefined) config.allowLan = !!patch.allowLan;
     if (patch.token !== undefined) config.token = String(patch.token || '');
     if (patch.agentBasePath !== undefined) config.agentBasePath = String(patch.agentBasePath || '').trim();
-    if (patch.sofficePath !== undefined) config.sofficePath = String(patch.sofficePath || '');
     if (patch.autoStart !== undefined) config.autoStart = !!patch.autoStart;
     saveConfig();
     applyAutoStart();
@@ -561,7 +557,7 @@ function registerIpc() {
     return { ok: true, state: publicState() };
   });
   ipcMain.handle('cloudflare:accept-disclaimer', async () => {
-    config.quickDisclaimerAccepted = true;
+    config.disclaimerDontRemind = true;
     saveConfig();
     return { ok: true, state: publicState() };
   });
@@ -601,16 +597,6 @@ function registerIpc() {
   });
   ipcMain.handle('cloudflare:open-download', async () => {
     await shell.openExternal('https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/');
-  });
-
-  ipcMain.handle('dialog:pick-soffice', async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
-      title: '选择 soffice.exe',
-      properties: ['openFile'],
-      filters: [{ name: 'LibreOffice', extensions: ['exe'] }],
-    });
-    if (result.canceled || !result.filePaths.length) return { ok: false };
-    return { ok: true, path: result.filePaths[0] };
   });
 
   ipcMain.handle('app:open-web', async () => shell.openExternal(webUrl()));

@@ -23,7 +23,7 @@ function mimeFor(filePath) {
 }
 
 /**
- * 将待打印文件提交给宿主机打印 Agent。
+ * 将待打印文件提交给本地打印服务。
  * @param {object} task 队列任务
  */
 async function submit(task) {
@@ -63,7 +63,7 @@ async function submit(task) {
       data = { message: text };
     }
     if (!res.ok || data.success === false) {
-      throw new Error(data.message || `宿主机打印接口返回 ${res.status}`);
+      throw new Error(data.message || `本地打印服务返回 ${res.status}`);
     }
     return data;
   } catch (err) {
@@ -92,7 +92,7 @@ async function ping() {
     const res = await fetch(`${config.hostPrintApi}/health`);
     return res.ok;
   } catch (err) {
-    logger.warn(`宿主机打印 Agent 不可用：${err.message}`);
+    logger.warn(`本地打印服务不可用：${err.message}`);
     return false;
   }
 }

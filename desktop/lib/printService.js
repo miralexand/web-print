@@ -1,8 +1,8 @@
 'use strict';
 
 /**
- * 打包进 Electron 的本地打印服务核心（与 host-print-agent/agent.js 功能一致）。
- * - Office 转 PDF：优先 LibreOffice，其次 Microsoft Office / WPS 的 COM 自动化兜底
+ * 打包进 Electron 的本地打印服务核心。
+ * - 文档转 PDF：默认使用 WPS 的 COM 转换（KWPS/KET/KWPP），失败后自动切换到 Microsoft Office（Word/Excel/PowerPoint）
  * - 支持可配置的 URL 路径前缀（basePath），便于通过 Cloudflare 隧道以“域名 + 路径”暴露
  */
 
@@ -13,27 +13,6 @@ const { execFile } = require('child_process');
 const express = require('express');
 const multer = require('multer');
 const { print, getPrinters } = require('pdf-to-printer');
-
-function findSoffice() {
-  const candidates = [
-    process.env.SOFFICE_PATH,
-    'C:\\Program Files\\LibreOffice\\program\\soffice.exe',
-    'C:\\Program Files (x86)\\LibreOffice\\program\\soffice.exe',
-    'C:\\Program Files\\LibreOffice 7\\program\\soffice.exe',
-    'C:\\Program Files\\LibreOffice 6\\program\\soffice.exe',
-    'D:\\Program Files\\LibreOffice\\program\\soffice.exe',
-    '/usr/bin/soffice',
-    '/usr/bin/libreoffice',
-  ].filter(Boolean);
-  for (const candidate of candidates) {
-    try {
-      if (fs.existsSync(candidate)) return candidate;
-    } catch (_) {
-      /* ignore */
-    }
-  }
-  return 'soffice';
-}
 
 function normalizeBasePath(input) {
   if (!input) return '';
@@ -61,8 +40,9 @@ function normalizePages(value) {
   return /^[0-9,-]{1,100}$/.test(s) ? s : '';
 }
 
-// 通过 Office / WPS 的 COM 自动化转 PDF（Windows 专用）
-// 注意：部分环境（如 WPS 接管）在关闭 COM 时会抛 RPC 错误，但 PDF 已生成，
+// 通过 WPS / Microsoft Office 的 COM 自动化转 PDF（Windows 专用）。
+// 通过环境变量 CONV_SUITE 选择套件：wps 或 office。
+// 注意：部分环境在关闭 COM 时会抛 RPC 错误，但 PDF 已生成，
 // 因此以“输出文件是否存在”为成功判据，忽略 Quit/Close 的异常。
 const COM_SCRIPT = `
 $ErrorActionPreference = 'Stop'
@@ -74,20 +54,25 @@ function Quiet([scriptblock]$block) { try { & $block } catch { } }
 $in = $env:CONV_IN
 $out = $env:CONV_OUT
 $ext = $env:CONV_EXT
+if ($env:CONV_SUITE -eq 'wps') {
+  $word = @('KWPS.Application'); $excel = @('KET.Application'); $ppt = @('KWPP.Application')
+} else {
+  $word = @('Word.Application'); $excel = @('Excel.Application'); $ppt = @('PowerPoint.Application')
+}
 try {
   if ($ext -eq '.xls' -or $ext -eq '.xlsx' -or $ext -eq '.csv') {
-    $app = New-App @('Excel.Application','KET.Application')
+    $app = New-App $excel
     $app.Visible = $false; $app.DisplayAlerts = $false
     $wb = $app.Workbooks.Open($in, 0, $true)
     $wb.ExportAsFixedFormat(0, $out)
     Quiet { $wb.Close($false) }; Quiet { $app.Quit() }
   } elseif ($ext -eq '.ppt' -or $ext -eq '.pptx') {
-    $app = New-App @('PowerPoint.Application','KWPP.Application')
+    $app = New-App $ppt
     $pres = $app.Presentations.Open($in, $true, $false, $false)
     $pres.SaveAs($out, 32)
     Quiet { $pres.Close() }; Quiet { $app.Quit() }
   } else {
-    $app = New-App @('Word.Application','KWPS.Application')
+    $app = New-App $word
     $app.Visible = $false; $app.DisplayAlerts = 0
     $doc = $app.Documents.Open($in, $false, $true)
     $doc.ExportAsFixedFormat($out, 17)
@@ -105,7 +90,6 @@ class PrintService {
     this.port = Number.parseInt(options.port, 10) || 8081;
     this.token = options.token || '';
     this.basePath = normalizeBasePath(options.basePath);
-    this.sofficePath = options.sofficePath || findSoffice();
     this.workDir = options.workDir || path.join(os.tmpdir(), 'webprint-agent');
     this.uploadDir = path.join(this.workDir, 'uploads');
     this.convertDir = path.join(this.workDir, 'converted');
@@ -132,73 +116,20 @@ class PrintService {
     }
   }
 
-  sofficeFound() {
-    if (!this.sofficePath || this.sofficePath === 'soffice') return false;
-    try {
-      return fs.existsSync(this.sofficePath);
-    } catch (_) {
-      return false;
-    }
-  }
-
-  latestPdf(dir) {
-    try {
-      const files = fs.readdirSync(dir)
-        .filter((f) => f.toLowerCase().endsWith('.pdf'))
-        .map((f) => {
-          const p = path.join(dir, f);
-          return { p, t: fs.statSync(p).mtimeMs };
-        })
-        .sort((a, b) => b.t - a.t);
-      return files.length ? files[0].p : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /** 用 LibreOffice 转换（独立用户配置目录 + 重试） */
-  convertWithLibreOffice(filePath, expected) {
-    const outDir = this.convertDir;
-    const profileDir = path.join(this.workDir, `lo-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    const profileUri = `file:///${profileDir.replace(/\\/g, '/')}`;
-    const args = [
-      '--headless', '--nologo', '--nofirststartwizard', '--norestore', '--invisible',
-      `-env:UserInstallation=${profileUri}`,
-      '--convert-to', 'pdf', '--outdir', outDir, filePath,
-    ];
-    const runOnce = () => new Promise((resolve) => {
-      execFile(this.sofficePath, args, { timeout: 180000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
-        resolve({ err, output: `${stdout || ''}${stderr || ''}`.trim() });
-      });
-    });
-    return (async () => {
-      fs.mkdirSync(profileDir, { recursive: true });
-      try {
-        let result = await runOnce();
-        if (!result.err && fs.existsSync(expected)) return expected;
-        for (let i = 0; i < 10; i += 1) {
-          await new Promise((r) => setTimeout(r, 300));
-          if (fs.existsSync(expected)) return expected;
-        }
-        result = await runOnce();
-        if (!result.err && fs.existsSync(expected)) return expected;
-        const found = this.latestPdf(outDir);
-        if (found) return found;
-        throw new Error(result.output || (result.err && result.err.message) || 'LibreOffice 未生成 PDF');
-      } finally {
-        this.cleanup(profileDir);
-      }
-    })();
-  }
-
-  /** 用 Microsoft Office / WPS 的 COM 自动化转换 */
-  convertWithCom(filePath, expected) {
+  /** 用指定套件（wps / office）的 COM 转换 */
+  convertWithCom(filePath, expected, suite) {
     const ext = path.extname(filePath).toLowerCase();
     return new Promise((resolve, reject) => {
       if (process.platform !== 'win32') {
         return reject(new Error('COM 转换仅支持 Windows'));
       }
-      const env = { ...process.env, CONV_IN: filePath, CONV_OUT: expected, CONV_EXT: ext };
+      const env = {
+        ...process.env,
+        CONV_IN: filePath,
+        CONV_OUT: expected,
+        CONV_EXT: ext,
+        CONV_SUITE: suite,
+      };
       execFile(
         'powershell.exe',
         ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-Command', COM_SCRIPT],
@@ -207,38 +138,31 @@ class PrintService {
           const output = `${stdout || ''}${stderr || ''}`.trim();
           // 只要 PDF 已生成即视为成功（忽略退出时的 RPC/关闭异常）
           if (fs.existsSync(expected)) return resolve(expected);
-          return reject(new Error(output || (err && err.message) || 'Office/WPS 未生成 PDF'));
+          return reject(new Error(output || (err && err.message) || '未生成 PDF'));
         }
       );
     });
   }
 
   /**
-   * Office / 图片 → PDF：LibreOffice 优先，失败后用 Office/WPS COM 兜底。
+   * 文档 → PDF：默认 WPS，失败后切换 Microsoft Office。
    * 返回生成的 PDF 路径。
    */
   async convertToPdf(filePath) {
     fs.mkdirSync(this.convertDir, { recursive: true });
     const expected = path.join(this.convertDir, path.basename(filePath).replace(/\.[^.]+$/, '') + '.pdf');
     const errors = [];
-
-    if (this.sofficeFound()) {
+    for (const suite of ['wps', 'office']) {
+      const label = suite === 'wps' ? 'WPS' : 'Microsoft Office';
       try {
-        return await this.convertWithLibreOffice(filePath, expected);
+        const out = await this.convertWithCom(filePath, expected, suite);
+        if (fs.existsSync(out)) return out;
+        errors.push(`${label}：未生成 PDF`);
       } catch (err) {
-        errors.push(`LibreOffice：${err.message}`);
+        errors.push(`${label}：${err.message}`);
       }
-    } else {
-      errors.push('LibreOffice：未检测到 soffice');
     }
-
-    try {
-      return await this.convertWithCom(filePath, expected);
-    } catch (err) {
-      errors.push(`Office/WPS：${err.message}`);
-    }
-
-    throw new Error(`文档转 PDF 失败。${errors.join('；')}。请安装 LibreOffice，或安装 Microsoft Office / WPS 后重试。`);
+    throw new Error(`文档转 PDF 失败（已尝试 WPS、Microsoft Office）。${errors.join('；')}。请安装 WPS 或 Microsoft Office 后重试。`);
   }
 
   buildRouter() {
@@ -262,8 +186,7 @@ class PrintService {
         ok: true,
         service: 'web-print-agent',
         basePath: this.basePath,
-        soffice: this.sofficePath,
-        sofficeFound: this.sofficeFound(),
+        convertOrder: 'WPS → Microsoft Office',
         printers: printerCount,
       });
     });
@@ -301,7 +224,7 @@ class PrintService {
       const jobId = (req.body.jobId || '').trim();
       try {
         if (ext && ext !== '.pdf') {
-          this.log(`任务 ${jobId}: 转换 ${ext} -> PDF`);
+          this.log(`任务 ${jobId}: 转换 ${ext} -> PDF（WPS 优先 / Office 兜底）`);
           convertedPath = await this.convertToPdf(uploadedPath);
           pdfPath = convertedPath;
         }
@@ -339,14 +262,13 @@ class PrintService {
     if (this.running) return Promise.resolve(this.status());
     fs.mkdirSync(this.uploadDir, { recursive: true });
     fs.mkdirSync(this.convertDir, { recursive: true });
-    if (!this.sofficePath) this.sofficePath = findSoffice();
     const app = this.buildApp();
     return new Promise((resolve, reject) => {
       const server = app.listen(this.port, this.host, () => {
         this.server = server;
         this.running = true;
         this.log(`打印服务已启动：http://${this.host}:${this.port}${this.basePath}`);
-        this.log(`LibreOffice：${this.sofficeFound() ? this.sofficePath : '未检测到，将使用 Office/WPS 转换'}`);
+        this.log('文档转换：优先 WPS COM，失败后切换 Microsoft Office COM');
         resolve(this.status());
       });
       server.on('error', (err) => {
@@ -382,10 +304,8 @@ class PrintService {
       port: this.port,
       token: this.token,
       basePath: this.basePath,
-      sofficePath: this.sofficePath,
-      sofficeFound: this.sofficeFound(),
     };
   }
 }
 
-module.exports = { PrintService, findSoffice, decodeFilename, normalizeBasePath };
+module.exports = { PrintService, decodeFilename, normalizeBasePath, normalizePages };

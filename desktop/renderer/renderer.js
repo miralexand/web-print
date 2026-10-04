@@ -1,7 +1,7 @@
 'use strict';
 
 const { createApp, reactive, ref, computed, onMounted } = Vue;
-const { ElMessage, ElMessageBox } = ElementPlus;
+const { ElMessage } = ElementPlus;
 
 const app = createApp({
   setup() {
@@ -22,8 +22,6 @@ const app = createApp({
       host: '127.0.0.1',
       port: 8081,
       token: '',
-      sofficePath: '',
-      sofficeFound: false,
       autoStart: false,
       portable: false,
       dataDir: '',
@@ -44,13 +42,15 @@ const app = createApp({
       cloudflaredPath: '',
       resolvedPath: '',
       managedByService: false,
-      quickDisclaimerAccepted: false,
+      disclaimerDontRemind: false,
       service: { installed: false, running: false },
     });
 
+    const disclaimer = reactive({ show: false, dontRemind: false, resolve: null });
+
     const printers = ref([]);
     const busy = reactive({ service: false, web: false, printers: false, tunnel: false, download: false });
-    const serviceForm = reactive({ port: 8081, webPort: 3000, allowLan: true, token: '', agentBasePath: '', sofficePath: '', autoStart: false });
+    const serviceForm = reactive({ port: 8081, webPort: 3000, allowLan: true, token: '', agentBasePath: '', autoStart: false });
     const tunnelForm = reactive({ mode: 'quick', url: 'http://127.0.0.1:3000', token: '', cloudflaredPath: '', autoStart: false });
 
     const serviceLogs = computed(() => (state.logs || []).join('\n'));
@@ -64,7 +64,6 @@ const app = createApp({
       serviceForm.allowLan = s.web ? !!s.web.allowLan : true;
       serviceForm.token = s.token || '';
       serviceForm.agentBasePath = s.basePath || '';
-      serviceForm.sofficePath = s.sofficePath || '';
       serviceForm.autoStart = !!s.autoStart;
       if (s.cloudflare) {
         tunnelForm.mode = s.cloudflare.mode || 'quick';
@@ -81,8 +80,6 @@ const app = createApp({
       state.host = s.host;
       state.port = s.port;
       state.token = s.token;
-      state.sofficePath = s.sofficePath;
-      state.sofficeFound = !!s.sofficeFound;
       state.autoStart = s.autoStart;
       state.portable = s.portable;
       state.dataDir = s.dataDir;
@@ -101,7 +98,7 @@ const app = createApp({
         tunnel.cloudflaredPath = s.cloudflare.cloudflaredPath;
         tunnel.resolvedPath = s.cloudflare.resolvedPath;
         tunnel.managedByService = s.cloudflare.managedByService;
-        tunnel.quickDisclaimerAccepted = !!s.cloudflare.quickDisclaimerAccepted;
+        tunnel.disclaimerDontRemind = !!s.cloudflare.disclaimerDontRemind;
         tunnel.service = s.cloudflare.service || { installed: false, running: false };
       }
       if (!initialized.value) {
@@ -170,24 +167,36 @@ const app = createApp({
       }
     }
 
-    async function ensureQuickDisclaimer() {
-      if (tunnelForm.mode !== 'quick' || tunnel.quickDisclaimerAccepted) return true;
-      try {
-        await ElMessageBox.confirm(
-          '快速隧道由 Cloudflare 免费提供，公网地址随机且不固定，可能随时失效、中断或无法访问，可用性不作任何保证。请勿用于机密或敏感文件。因使用快速隧道产生的任何风险与后果，均由使用者自行承担。',
-          '快速隧道免责声明',
-          { confirmButtonText: '我已阅读并同意', cancelButtonText: '取消', type: 'warning', dangerouslyUseHTMLString: false }
-        );
-      } catch (_) {
-        return false;
+    function askDisclaimer() {
+      if (tunnel.disclaimerDontRemind) return Promise.resolve(true);
+      return new Promise((resolve) => {
+        disclaimer.dontRemind = false;
+        disclaimer.resolve = resolve;
+        disclaimer.show = true;
+      });
+    }
+
+    function disclaimerConfirm() {
+      const resolve = disclaimer.resolve;
+      disclaimer.resolve = null;
+      disclaimer.show = false;
+      if (disclaimer.dontRemind) {
+        window.trayApi.tunnelAcceptDisclaimer().then((res) => {
+          if (res && res.state) syncState(res.state);
+        });
       }
-      const res = await window.trayApi.tunnelAcceptDisclaimer();
-      if (res && res.state) syncState(res.state);
-      return true;
+      if (resolve) resolve(true);
+    }
+
+    function disclaimerCancel() {
+      const resolve = disclaimer.resolve;
+      disclaimer.resolve = null;
+      disclaimer.show = false;
+      if (resolve) resolve(false);
     }
 
     async function saveTunnel(start) {
-      if (start && !(await ensureQuickDisclaimer())) return;
+      if (start && !(await askDisclaimer())) return;
       busy.tunnel = true;
       try {
         if (start) await window.trayApi.tunnelStop();
@@ -210,7 +219,7 @@ const app = createApp({
     }
 
     async function startTunnel() {
-      if (!(await ensureQuickDisclaimer())) return;
+      if (!(await askDisclaimer())) return;
       busy.tunnel = true;
       try {
         const res = await window.trayApi.tunnelStart();
@@ -269,11 +278,6 @@ const app = createApp({
       } finally {
         busy.tunnel = false;
       }
-    }
-
-    async function pickSoffice() {
-      const res = await window.trayApi.pickSoffice();
-      if (res.ok) serviceForm.sofficePath = res.path;
     }
 
     async function downloadCloudflared() {
@@ -336,6 +340,9 @@ const app = createApp({
       tutorialOpen,
       state,
       tunnel,
+      disclaimer,
+      disclaimerConfirm,
+      disclaimerCancel,
       printers,
       busy,
       serviceForm,
@@ -355,7 +362,6 @@ const app = createApp({
       stopTunnel,
       restartTunnel,
       pickCloudflared,
-      pickSoffice,
       installService,
       uninstallService,
       downloadCloudflared,

@@ -50,7 +50,7 @@
         <!-- 概览 -->
         <section v-show="tab === 'overview'">
           <h1 class="page-title">概览</h1>
-          <p class="page-sub">一体化运行，无需 Docker</p>
+          <p class="page-sub">一体化运行：网页服务 + 本机打印 + 隧道</p>
 
           <div class="cards">
             <div class="stat-card">
@@ -179,7 +179,7 @@
                 <div class="hint">默认指向本机 Web 打印服务</div>
               </el-form-item>
               <el-form-item v-if="tunnelForm.mode === 'quick'" label="免责声明">
-                <div class="hint">快速隧道由 Cloudflare 免费提供，公网地址随机且可能随时失效、中断或无法访问，可用性不作保证；请勿用于机密或敏感文件，使用快速隧道产生的风险与后果由使用者自行承担。</div>
+                <div class="hint">快速隧道由 Cloudflare 免费提供，公网地址随机且可能随时失效、中断或无法访问，可用性不作保证；请勿用于机密或敏感文件（政企/涉密单位请遵守本单位保密规定）。使用公网访问产生的风险与后果由使用者自行承担。</div>
               </el-form-item>
               <el-form-item v-else label="Tunnel Token">
                 <el-input v-model="tunnelForm.token" type="password" show-password placeholder="粘贴以 eyJ 开头的 Token，或直接粘贴 cloudflared service install eyJ... 整条命令" />
@@ -257,17 +257,8 @@
                 <el-input v-model="serviceForm.agentBasePath" placeholder="如 /agent，留空则仅根路径" />
                 <div class="hint">用于通过 Cloudflare 隧道以「域名 + 路径」暴露 8081：Public Hostname 的 Path 填 <span class="kbd">/agent</span>，Service 填 <span class="kbd">http://127.0.0.1:8081</span>，此处也填 <span class="kbd">/agent</span>；并请务必设置访问令牌。</div>
               </el-form-item>
-              <el-form-item label="Document 转换">
-                <div class="input-row">
-                  <el-input v-model="serviceForm.sofficePath" placeholder="LibreOffice 路径（留空自动探测）" />
-                  <el-button @click="pickSoffice">浏览</el-button>
-                </div>
-                <div class="hint">
-                  Word/Excel/PPT 转 PDF：优先用 LibreOffice；未安装时自动回退到本机 Microsoft Office / WPS。
-                  当前：
-                  <el-tag v-if="state.sofficeFound" type="success" size="small" effect="plain">已检测到 LibreOffice</el-tag>
-                  <el-tag v-else type="warning" size="small" effect="plain">未检测到 LibreOffice（将用 Office/WPS）</el-tag>
-                </div>
+              <el-form-item label="文档转换">
+                <div class="hint">Word / Excel / PPT 转 PDF：默认使用 <b>WPS</b> 的 COM 转换，失败时自动切换到 <b>Microsoft Office</b>。请确保本机已安装 WPS 或 Microsoft Office（任一即可）。</div>
               </el-form-item>
               <el-form-item label="开机自动启动"><el-switch v-model="serviceForm.autoStart" /></el-form-item>
               <el-form-item label="数据目录"><span class="mono muted">{{ state.dataDir }}</span></el-form-item>
@@ -286,7 +277,7 @@
             <img class="about-icon" src="../build/icon.svg" alt="icon" />
             <div class="about-name">{{ state.about.name || 'WebPrint 打印助手' }}</div>
             <div class="about-version">版本 {{ state.about.version }} · {{ state.about.license }}</div>
-            <div class="about-desc">自托管的网页打印系统：网页上传 → 本机打印，支持账号/配额、任务队列与 Cloudflare Tunnel。本版本已完全脱离 Docker，一体化运行。</div>
+            <div class="about-desc">自托管的网页打印系统：网页上传 → 本机打印，支持账号/配额、任务队列、文档预览与 Cloudflare Tunnel。桌面端一体化运行，开箱即用。</div>
             <div class="about-repo">
               <span class="muted">仓库地址</span>
               <span class="mono link" @click="openExternal(state.about.repo)">{{ state.about.repo }}</span>
@@ -307,6 +298,28 @@
           </div>
         </section>
       </main>
+    </div>
+  </div>
+
+  <!-- 公网访问免责声明 -->
+  <div v-if="disclaimer.show" class="dlg-mask">
+    <div class="dlg">
+      <div class="dlg-head"><span class="dlg-badge">重要</span>公网访问免责声明</div>
+      <div class="dlg-body">
+        <p>开启 Cloudflare 隧道后，本机网页打印服务将可通过公网访问。请务必阅读并同意以下内容：</p>
+        <ol>
+          <li>公网访问会把本机打印能力暴露到互联网，存在被他人滥用的风险。</li>
+          <li>快速隧道的公网地址随机、可能随时失效或中断，可用性不作任何保证。</li>
+          <li><b>政企 / 事业 / 涉密单位请注意：</b>请勿通过公网隧道传输涉密、敏感或内部文件；如确需使用，请事先遵守本单位的信息安全与保密规定并完成审批。</li>
+          <li>请设置强密码、及时修改默认账号，并建议叠加 Cloudflare Access 等访问控制。</li>
+          <li>因启用公网访问产生的任何风险与后果，均由使用者自行承担。</li>
+        </ol>
+        <label class="dlg-check"><input type="checkbox" v-model="disclaimer.dontRemind" /> 我已阅读并同意，下次不再提醒</label>
+      </div>
+      <div class="dlg-actions">
+        <el-button @click="disclaimerCancel">取消</el-button>
+        <el-button type="primary" @click="disclaimerConfirm">同意并继续</el-button>
+      </div>
     </div>
   </div>
 

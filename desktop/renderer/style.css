@@ -181,6 +181,29 @@ body {
 ::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.3); background-clip: content-box; }
 ::-webkit-scrollbar-track { background: transparent; }
 
+/* 公网访问免责声明弹窗 */
+.dlg-mask {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.dlg {
+  width: 100%; max-width: 580px; max-height: 86vh; overflow: auto;
+  background: #fff; border-radius: 22px; padding: 24px 26px;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.35);
+}
+.dlg-head { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 700; }
+.dlg-badge { font-size: 12px; padding: 2px 10px; border-radius: 999px; background: #fdecec; color: #c0392b; }
+.dlg-body { margin: 14px 0; color: #3a3a3c; font-size: 13px; line-height: 1.75; }
+.dlg-body p { margin: 0 0 10px; }
+.dlg-body ol { margin: 0; padding-left: 20px; }
+.dlg-body li { margin: 6px 0; }
+.dlg-check { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 13px; color: #1d1d1f; cursor: pointer; }
+.dlg-check input { width: auto; }
+.dlg-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
 /* 傻瓜教程 */
 .tutorial { margin-top: 14px; }
 .tut-card {

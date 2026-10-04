@@ -31,32 +31,35 @@ const app = createApp({
     });
 
     const tunnel = reactive({
-      running: false,
-      starting: false,
-      url: '',
-      error: '',
-      logs: [],
-      mode: 'quick',
-      targetUrl: 'http://127.0.0.1:3000',
-      token: '',
-      cloudflaredPath: '',
       resolvedPath: '',
+      cloudflaredPath: '',
       managedByService: false,
       disclaimerDontRemind: false,
       service: { installed: false, running: false },
+      quick: { running: false, starting: false, url: '', error: '', logs: [], targetUrl: 'http://127.0.0.1:3000' },
+      token: { running: false, starting: false, url: '', error: '', logs: [], token: '' },
     });
 
     const disclaimer = reactive({ show: false, dontRemind: false, resolve: null });
+    const update = reactive({ show: false, checking: false, current: '', latest: '', notes: '', releaseUrl: '', setupUrl: '', zipUrl: '', installing: false, error: '' });
 
     const printers = ref([]);
     const busy = reactive({ service: false, web: false, printers: false, tunnel: false, download: false });
     const serviceForm = reactive({ port: 8081, webPort: 3000, allowLan: true, token: '', agentBasePath: '', autoStart: false });
-    const tunnelForm = reactive({ mode: 'quick', url: 'http://127.0.0.1:3000', token: '', cloudflaredPath: '', autoStart: false });
+    const quickForm = reactive({ url: 'http://127.0.0.1:3000', autoStart: false });
+    const tokenForm = reactive({ token: '', publicUrl: '', autoStart: false });
 
     const serviceLogs = computed(() => (state.logs || []).join('\n'));
-    const tunnelLogs = computed(() => (tunnel.logs || []).join('\n'));
-    const tunnelRunning = computed(() => tunnel.running);
-    const allRunning = computed(() => state.web.running && state.running);
+    const quickLogs = computed(() => (tunnel.quick.logs || []).join('\n'));
+    const tokenLogs = computed(() => (tunnel.token.logs || []).join('\n'));
+    const coreRunning = computed(() => state.web.running && state.running);
+    const cloudflaredMissing = computed(() => !tunnel.resolvedPath || tunnel.resolvedPath === 'cloudflared');
+    const hasSavedToken = computed(() => !!tunnel.token.token);
+    const maskedSavedToken = computed(() => {
+      const t = tunnel.token.token || '';
+      if (!t) return '';
+      return t.length > 14 ? `${t.slice(0, 6)}…${t.slice(-4)}` : t;
+    });
 
     function initForms(s) {
       serviceForm.port = s.port;
@@ -66,11 +69,11 @@ const app = createApp({
       serviceForm.agentBasePath = s.basePath || '';
       serviceForm.autoStart = !!s.autoStart;
       if (s.cloudflare) {
-        tunnelForm.mode = s.cloudflare.mode || 'quick';
-        tunnelForm.url = s.cloudflare.targetUrl || 'http://127.0.0.1:3000';
-        tunnelForm.token = s.cloudflare.token || '';
-        tunnelForm.cloudflaredPath = s.cloudflare.cloudflaredPath || '';
-        tunnelForm.autoStart = !!s.cloudflare.autoStart;
+        quickForm.url = (s.cloudflare.quick && s.cloudflare.quick.targetUrl) || 'http://127.0.0.1:3000';
+        quickForm.autoStart = !!s.cloudflare.autoQuick;
+        tokenForm.token = (s.cloudflare.token && s.cloudflare.token.token) || '';
+        tokenForm.publicUrl = (s.cloudflare.token && s.cloudflare.token.publicUrl) || '';
+        tokenForm.autoStart = !!s.cloudflare.autoToken;
       }
     }
 
@@ -87,19 +90,13 @@ const app = createApp({
       if (s.web) Object.assign(state.web, s.web);
       if (s.about) state.about = s.about;
       if (s.cloudflare) {
-        tunnel.running = s.cloudflare.running;
-        tunnel.starting = !!s.cloudflare.starting;
-        tunnel.url = s.cloudflare.url;
-        tunnel.error = s.cloudflare.error;
-        tunnel.logs = s.cloudflare.logs || [];
-        tunnel.mode = s.cloudflare.mode;
-        tunnel.targetUrl = s.cloudflare.targetUrl;
-        tunnel.token = s.cloudflare.token;
-        tunnel.cloudflaredPath = s.cloudflare.cloudflaredPath;
         tunnel.resolvedPath = s.cloudflare.resolvedPath;
+        tunnel.cloudflaredPath = s.cloudflare.cloudflaredPath;
         tunnel.managedByService = s.cloudflare.managedByService;
         tunnel.disclaimerDontRemind = !!s.cloudflare.disclaimerDontRemind;
         tunnel.service = s.cloudflare.service || { installed: false, running: false };
+        if (s.cloudflare.quick) Object.assign(tunnel.quick, s.cloudflare.quick);
+        if (s.cloudflare.token) Object.assign(tunnel.token, s.cloudflare.token);
       }
       if (!initialized.value) {
         initForms(s);
@@ -195,57 +192,155 @@ const app = createApp({
       if (resolve) resolve(false);
     }
 
-    async function saveTunnel(start) {
+    async function ensureCloudflaredDownloaded() {
+      if (!cloudflaredMissing.value) return true;
+      ElMessage.info('未找到 cloudflared，正在自动下载…');
+      const dl = await window.trayApi.tunnelDownload();
+      if (dl && dl.state) syncState(dl.state);
+      if (!dl || !dl.ok) {
+        ElMessage.error((dl && dl.error) || 'cloudflared 下载失败');
+        return false;
+      }
+      ElMessage.success(`cloudflared 下载完成（来源：${dl.source || '官方'}）`);
+      return true;
+    }
+
+    // ---------- 快速隧道 ----------
+    async function saveQuickConfig(start) {
       if (start && !(await askDisclaimer())) return;
       busy.tunnel = true;
       try {
-        if (start) await window.trayApi.tunnelStop();
-        const res = await window.trayApi.tunnelSave({ ...tunnelForm });
-        if (!res.ok) {
-          ElMessage.error(res.error || '保存失败');
-          return;
-        }
+        if (start && !(await ensureCloudflaredDownloaded())) return;
+        const res = await window.trayApi.tunnelSave({ url: quickForm.url, autoQuick: quickForm.autoStart });
+        if (res && res.state) syncState(res.state);
         if (start) {
-          const started = await window.trayApi.tunnelStart();
+          const started = await window.trayApi.quickStart();
           if (started && started.state) syncState(started.state);
-          ElMessage.success('隧道已启动，正在获取公网地址…');
+          ElMessage.success('快速隧道已启动，正在获取公网地址…');
         } else {
-          syncState(res.state);
-          ElMessage.success('隧道配置已保存');
+          ElMessage.success('快速隧道配置已保存');
         }
       } finally {
         busy.tunnel = false;
       }
     }
 
-    async function startTunnel() {
+    async function startQuickTunnel() {
       if (!(await askDisclaimer())) return;
       busy.tunnel = true;
       try {
-        const res = await window.trayApi.tunnelStart();
+        if (!(await ensureCloudflaredDownloaded())) return;
+        const res = await window.trayApi.tunnelSave({ url: quickForm.url, autoQuick: quickForm.autoStart });
         if (res && res.state) syncState(res.state);
+        const started = await window.trayApi.quickStart();
+        if (started && started.state) syncState(started.state);
       } finally {
         busy.tunnel = false;
       }
     }
 
-    async function stopTunnel() {
+    async function oneClickPublic() {
+      if (!(await askDisclaimer())) return;
       busy.tunnel = true;
       try {
-        const res = await window.trayApi.tunnelStop();
-        if (res && res.state) syncState(res.state);
-        ElMessage.success('隧道已停止');
+        if (!(await ensureCloudflaredDownloaded())) return;
+        quickForm.url = quickForm.url || `http://127.0.0.1:${state.web.port}`;
+        const saved = await window.trayApi.tunnelSave({ url: quickForm.url, autoQuick: quickForm.autoStart });
+        if (saved && saved.state) syncState(saved.state);
+        const started = await window.trayApi.quickStart();
+        if (started && started.state) syncState(started.state);
+        const q = started && started.state && started.state.cloudflare && started.state.cloudflare.quick;
+        if (q && q.error) ElMessage.error(q.error);
+        else ElMessage.success('已开启公网访问，正在获取地址…');
       } finally {
         busy.tunnel = false;
       }
     }
 
-    async function restartTunnel() {
+    async function stopQuickTunnel() {
       busy.tunnel = true;
       try {
-        const res = await window.trayApi.tunnelRestart();
+        const res = await window.trayApi.quickStop();
         if (res && res.state) syncState(res.state);
-        ElMessage.success('正在重建隧道，稍候将生成新的公网地址…');
+        ElMessage.success('快速隧道已停止');
+      } finally {
+        busy.tunnel = false;
+      }
+    }
+
+    async function restartQuickTunnel() {
+      busy.tunnel = true;
+      try {
+        const res = await window.trayApi.quickRestart();
+        if (res && res.state) syncState(res.state);
+        ElMessage.success('正在重建快速隧道，稍候将生成新的公网地址…');
+      } finally {
+        busy.tunnel = false;
+      }
+    }
+
+    // ---------- 命名隧道 ----------
+    async function saveNamedConfig(start) {
+      if (start && !(await askDisclaimer())) return;
+      busy.tunnel = true;
+      try {
+        if (start && !(await ensureCloudflaredDownloaded())) return;
+        const res = await window.trayApi.tunnelSave({ token: tokenForm.token, autoToken: tokenForm.autoStart, publicUrl: tokenForm.publicUrl });
+        if (res && res.state) syncState(res.state);
+        if (start) {
+          const started = await window.trayApi.tokenStart();
+          if (started && started.state) syncState(started.state);
+          const t = started && started.state && started.state.cloudflare && started.state.cloudflare.token;
+          if (t && t.error) ElMessage.error(t.error);
+          else ElMessage.success('命名隧道已启动');
+        } else {
+          ElMessage.success('命名隧道配置已保存，下次打开自动带出');
+        }
+      } finally {
+        busy.tunnel = false;
+      }
+    }
+
+    async function startNamedTunnel() {
+      if (!(await askDisclaimer())) return;
+      busy.tunnel = true;
+      try {
+        if (!(await ensureCloudflaredDownloaded())) return;
+        const res = await window.trayApi.tunnelSave({ token: tokenForm.token, autoToken: tokenForm.autoStart, publicUrl: tokenForm.publicUrl });
+        if (res && res.state) syncState(res.state);
+        const started = await window.trayApi.tokenStart();
+        if (started && started.state) syncState(started.state);
+      } finally {
+        busy.tunnel = false;
+      }
+    }
+
+    async function stopNamedTunnel() {
+      busy.tunnel = true;
+      try {
+        const res = await window.trayApi.tokenStop();
+        if (res && res.state) syncState(res.state);
+        ElMessage.success('命名隧道已停止');
+      } finally {
+        busy.tunnel = false;
+      }
+    }
+
+    async function clearTokenConfig() {
+      if (!window.confirm('确定清除已保存的命名隧道配置（Token）吗？')) return;
+      busy.tunnel = true;
+      try {
+        if (tunnel.token.running) {
+          try {
+            await window.trayApi.tokenStop();
+          } catch (_) {
+            /* ignore */
+          }
+        }
+        const res = await window.trayApi.tunnelSave({ token: '' });
+        if (res && res.state) syncState(res.state);
+        tokenForm.token = '';
+        ElMessage.success('已清除已保存的配置');
       } finally {
         busy.tunnel = false;
       }
@@ -253,7 +348,11 @@ const app = createApp({
 
     async function pickCloudflared() {
       const res = await window.trayApi.tunnelPick();
-      if (res.ok) tunnelForm.cloudflaredPath = res.path;
+      if (res.ok) {
+        const saved = await window.trayApi.tunnelSave({ cloudflaredPath: res.path });
+        if (saved && saved.state) syncState(saved.state);
+        ElMessage.success('已设置 cloudflared 路径');
+      }
     }
 
     async function installService() {
@@ -286,7 +385,6 @@ const app = createApp({
       try {
         const res = await window.trayApi.tunnelDownload();
         if (res.ok) {
-          tunnelForm.cloudflaredPath = res.path;
           if (res.state) syncState(res.state);
           ElMessage.success('cloudflared 下载完成');
         } else {
@@ -300,23 +398,72 @@ const app = createApp({
     function openWeb() {
       window.trayApi.openWeb();
     }
+
+    async function checkUpdate() {
+      update.checking = true;
+      try {
+        const res = await window.trayApi.checkUpdate();
+        if (!res || !res.ok) {
+          ElMessage.error(`检查更新失败：${(res && res.error) || '未知错误'}`);
+          return;
+        }
+        if (!res.hasUpdate) {
+          ElMessage.success(`已是最新版本 v${res.current}`);
+          return;
+        }
+        Object.assign(update, {
+          show: true,
+          current: res.current,
+          latest: res.latest,
+          notes: res.notes || '',
+          releaseUrl: res.releaseUrl,
+          setupUrl: res.setupUrl || '',
+          zipUrl: res.zipUrl || '',
+          error: '',
+        });
+      } finally {
+        update.checking = false;
+      }
+    }
+
+    async function updateNow() {
+      update.error = '';
+      update.installing = true;
+      try {
+        const res = await window.trayApi.installUpdate({ setupUrl: update.setupUrl, zipUrl: update.zipUrl });
+        if (!res || !res.ok) {
+          update.error = (res && res.error) || '更新失败';
+          return;
+        }
+        ElMessage.success('更新已开始，应用将自动重启，请稍候…');
+      } finally {
+        update.installing = false;
+      }
+    }
+
+    function updateLater() {
+      update.show = false;
+    }
+
+    function openReleasePage() {
+      if (update.releaseUrl) openExternal(update.releaseUrl);
+      update.show = false;
+    }
+
     function openDownloadPage() {
       window.trayApi.tunnelOpenDownload();
     }
+
+    function openCloudflareConsole() {
+      window.trayApi.openExternal('https://one.dash.cloudflare.com/');
+    }
+
     function openExternal(url) {
       if (url) window.trayApi.openExternal(url);
     }
+
     function hideToTray() {
       window.trayApi.hide();
-    }
-
-    async function copyUrl() {
-      try {
-        await navigator.clipboard.writeText(tunnel.url);
-        ElMessage.success('已复制公网地址');
-      } catch (_) {
-        ElMessage.warning('复制失败，请手动选择');
-      }
     }
 
     async function copyText(text) {
@@ -343,33 +490,47 @@ const app = createApp({
       disclaimer,
       disclaimerConfirm,
       disclaimerCancel,
+      update,
       printers,
       busy,
       serviceForm,
-      tunnelForm,
+      quickForm,
+      tokenForm,
       serviceLogs,
-      tunnelLogs,
-      tunnelRunning,
-      allRunning,
+      quickLogs,
+      tokenLogs,
+      coreRunning,
+      cloudflaredMissing,
+      hasSavedToken,
+      maskedSavedToken,
       refresh,
       refreshAll,
       loadPrinters,
       toggleService,
       toggleWeb,
       saveService,
-      saveTunnel,
-      startTunnel,
-      stopTunnel,
-      restartTunnel,
+      saveQuickConfig,
+      startQuickTunnel,
+      oneClickPublic,
+      stopQuickTunnel,
+      restartQuickTunnel,
+      saveNamedConfig,
+      startNamedTunnel,
+      stopNamedTunnel,
+      clearTokenConfig,
       pickCloudflared,
       installService,
       uninstallService,
       downloadCloudflared,
       openWeb,
       openDownloadPage,
+      openCloudflareConsole,
       openExternal,
+      checkUpdate,
+      updateNow,
+      updateLater,
+      openReleasePage,
       hideToTray,
-      copyUrl,
       copyText,
     };
   },

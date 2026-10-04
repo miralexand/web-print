@@ -4,14 +4,40 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 const { app, BrowserWindow, Tray, Menu, ipcMain, shell, dialog, nativeImage, net } = require('electron');
 const { PrintService } = require('./lib/printService');
 const { CloudflaredManager, findCloudflared } = require('./lib/cloudflared');
 
 const REPO_URL = 'https://github.com/miralexand/web-print';
 const LICENSE_NAME = 'MulanPSL-2.0';
-const CLOUDFLARED_DOWNLOAD = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe';
+function cloudflaredAsset() {
+  if (process.arch === 'ia32') return 'cloudflared-windows-386.exe';
+  // Windows arm64 可回退使用 amd64
+  return 'cloudflared-windows-amd64.exe';
+}
+
+function cloudflaredDownloadUrls() {
+  const base = `https://github.com/cloudflare/cloudflared/releases/latest/download/${cloudflaredAsset()}`;
+  return [
+    base,
+    `https://ghproxy.net/${base}`,
+    `https://gh-proxy.com/${base}`,
+    `https://ghfast.top/${base}`,
+  ];
+}
+
+function isValidExe(file) {
+  try {
+    const fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(2);
+    fs.readSync(fd, buf, 0, 2, 0);
+    fs.closeSync(fd);
+    return buf[0] === 0x4d && buf[1] === 0x5a; // 'MZ'
+  } catch (_) {
+    return false;
+  }
+}
 
 let mainWindow = null;
 let tray = null;
@@ -34,11 +60,12 @@ let config = {
   autoStart: false,
   disclaimerDontRemind: false,
   cloudflare: {
-    mode: 'quick',
     url: 'http://127.0.0.1:3000',
     token: '',
+    publicUrl: '',
     cloudflaredPath: '',
-    autoStart: false,
+    autoQuick: false,
+    autoToken: false,
   },
 };
 
@@ -92,7 +119,8 @@ function buildResource(name) {
 function loadConfig() {
   try {
     if (fs.existsSync(configFile())) {
-      const parsed = JSON.parse(fs.readFileSync(configFile(), 'utf8'));
+      const text = fs.readFileSync(configFile(), 'utf8').replace(/^\uFEFF/, '');
+      const parsed = JSON.parse(text);
       config = {
         ...config,
         ...parsed,
@@ -248,6 +276,148 @@ function downloadFile(url, dest, redirects = 6) {
   });
 }
 
+/** 下载 cloudflared：官方地址不可用时自动切换镜像，并校验是否为有效 exe */
+async function downloadCloudflaredFile() {
+  const dest = path.join(dataDir(), 'cloudflared.exe');
+  const errors = [];
+  for (const url of cloudflaredDownloadUrls()) {
+    let host = url;
+    try {
+      host = new URL(url).host;
+    } catch (_) {
+      /* ignore */
+    }
+    try {
+      await downloadFile(url, dest);
+      if (isValidExe(dest)) return { ok: true, path: dest, source: host };
+      errors.push(`${host}：下载内容不是有效的 exe`);
+      try {
+        fs.rmSync(dest, { force: true });
+      } catch (_) {
+        /* ignore */
+      }
+    } catch (err) {
+      errors.push(`${host}：${err.message}`);
+    }
+  }
+  return { ok: false, error: errors.join('；') };
+}
+
+// ---------- 检查更新 ----------
+const RELEASES_LATEST_API = `https://api.github.com/repos/${REPO_URL.split('/').slice(-2).join('/')}/releases/latest`;
+
+function parseVersion(tag) {
+  const m = String(tag || '').replace(/^v/i, '').match(/^(\d+)\.(\d+)\.(\d+)/);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+
+function isNewer(latest, current) {
+  const a = parseVersion(latest);
+  const b = parseVersion(current);
+  if (!a || !b) return false;
+  for (let i = 0; i < 3; i += 1) {
+    if (a[i] > b[i]) return true;
+    if (a[i] < b[i]) return false;
+  }
+  return false;
+}
+
+function fetchJson(url) {
+  return new Promise((resolve, reject) => {
+    const req = net.request(url);
+    req.setHeader('User-Agent', 'WebPrintTray');
+    req.setHeader('Accept', 'application/vnd.github+json');
+    req.on('response', (res) => {
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+        const next = Array.isArray(res.headers.location) ? res.headers.location[0] : res.headers.location;
+        res.resume();
+        resolve(fetchJson(next));
+        return;
+      }
+      let data = '';
+      res.on('data', (chunk) => { data += chunk.toString(); });
+      res.on('end', () => {
+        if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
+        try {
+          resolve(JSON.parse(data));
+        } catch (_) {
+          reject(new Error('响应解析失败'));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+function withMirrors(url) {
+  if (/^https:\/\/github\.com\//i.test(url)) {
+    return [url, `https://ghproxy.net/${url}`, `https://gh-proxy.com/${url}`, `https://ghfast.top/${url}`];
+  }
+  return [url];
+}
+
+async function downloadWithMirrors(url, dest, opts = {}) {
+  const errors = [];
+  for (const u of withMirrors(url)) {
+    try {
+      await downloadFile(u, dest);
+      if (!fs.existsSync(dest) || fs.statSync(dest).size < 1024) throw new Error('文件过小或下载不完整');
+      if (opts.exe && !isValidExe(dest)) throw new Error('不是有效的 exe');
+      return u;
+    } catch (err) {
+      errors.push(`${u}：${err.message}`);
+      try {
+        fs.rmSync(dest, { force: true });
+      } catch (_) {
+        /* ignore */
+      }
+    }
+  }
+  throw new Error(errors.join('；'));
+}
+
+function extractZip(zip, dir) {
+  return new Promise((resolve, reject) => {
+    const cmd = `Expand-Archive -LiteralPath '${zip}' -DestinationPath '${dir}' -Force`;
+    execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', cmd], { windowsHide: true, timeout: 180000 }, (err, stdout, stderr) => {
+      if (err) return reject(new Error(`${stderr || err.message}`.trim()));
+      resolve();
+    });
+  });
+}
+
+function writeUpdateScript(srcDir, appDir, exePath) {
+  const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
+  const lines = [
+    '$ErrorActionPreference = "SilentlyContinue"',
+    `$src = ${q(srcDir)}`,
+    `$dst = ${q(appDir)}`,
+    `$exe = ${q(exePath)}`,
+    `$targetPid = ${process.pid}`,
+    'try { Wait-Process -Id $targetPid -Timeout 120 } catch {}',
+    'Start-Sleep -Milliseconds 1200',
+    'Copy-Item -Path (Join-Path $src "*") -Destination $dst -Recurse -Force',
+    'Start-Process -FilePath $exe',
+  ];
+  const file = path.join(os.tmpdir(), `webprint-update-${Date.now()}.ps1`);
+  fs.writeFileSync(file, lines.join('\r\n'), 'utf8');
+  return file;
+}
+
+/** 判断当前运行方式的安装类型：installed（安装版）/ green（绿色 zip 版）/ portable / dev */
+function installKind() {
+  if (!app.isPackaged) return 'dev';
+  if (process.env.PORTABLE_EXECUTABLE_DIR || process.env.PORTABLE_EXECUTABLE_FILE) return 'portable';
+  try {
+    const dir = path.dirname(process.execPath);
+    if (fs.readdirSync(dir).some((f) => /^Uninstall.*\.exe$/i.test(f))) return 'installed';
+  } catch (_) {
+    /* ignore */
+  }
+  return 'green';
+}
+
 // ---------- 窗口 ----------
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -280,6 +450,7 @@ function createWindow() {
           "({ sections: Array.from(document.querySelectorAll('main section')).map(s => ({ title: (s.querySelector('h1')||{}).textContent || '?', len: s.innerHTML.length, shown: getComputedStyle(s).display })), hasDialog: !!document.querySelector('.dlg-mask'), dialogInsideApp: !!document.querySelector('#app .dlg-mask') || !document.querySelector('.dlg-mask') })"
         );
         logLine('渲染诊断:', JSON.stringify(info));
+        logLine('命名隧道配置:', cloudflared && cloudflared.state().token.token ? `已加载 autoToken=${!!config.cloudflare.autoToken}` : '未保存 token');
       } catch (err) {
         logLine('渲染诊断失败:', err.message);
       }
@@ -322,12 +493,15 @@ function createTray() {
 function updateTrayMenu() {
   if (!tray) return;
   const agentOn = !!(service && service.running);
-  const tunnelOn = cloudflared ? cloudflared.state().running : false;
-  tray.setToolTip(`WebPrint - Web${webRunning ? '开' : '关'} / 打印${agentOn ? '开' : '关'} / 隧道${tunnelOn ? '开' : '关'}`);
+  const cf = cloudflared ? cloudflared.state() : { quick: {}, token: {} };
+  const quickOn = !!(cf.quick && cf.quick.running);
+  const tokenOn = !!(cf.token && cf.token.running);
+  tray.setToolTip(`WebPrint - Web${webRunning ? '开' : '关'} / 打印${agentOn ? '开' : '关'} / 快速${quickOn ? '开' : '关'} / 命名${tokenOn ? '开' : '关'}`);
   const menu = Menu.buildFromTemplate([
     { label: `Web 服务：${webRunning ? '运行中' : '已停止'}`, enabled: false },
     { label: `打印服务：${agentOn ? '运行中' : '已停止'}`, enabled: false },
-    { label: `Cloudflare 隧道：${tunnelOn ? '运行中' : '已停止'}`, enabled: false },
+    { label: `快速隧道：${quickOn ? '运行中' : '已停止'}`, enabled: false },
+    { label: `命名隧道：${tokenOn ? '运行中' : '已停止'}`, enabled: false },
     { type: 'separator' },
     { label: '显示主界面', click: showWindow },
     {
@@ -349,21 +523,31 @@ function updateTrayMenu() {
       },
     },
     {
-      label: tunnelOn ? '停止 Cloudflare 隧道' : '启动 Cloudflare 隧道',
+      label: quickOn ? '停止快速隧道' : '启动快速隧道',
       click: async () => {
         const mgr = await ensureCloudflared();
-        if (tunnelOn) mgr.stop();
-        else await mgr.start();
+        if (quickOn) mgr.stopQuick();
+        else await mgr.startQuick();
         updateTrayMenu();
         broadcastState();
       },
     },
     {
       label: '重建快速隧道',
-      visible: config.cloudflare.mode === 'quick' && tunnelOn,
+      visible: quickOn,
       click: async () => {
         const mgr = await ensureCloudflared();
-        await mgr.restart();
+        await mgr.restartQuick();
+        updateTrayMenu();
+        broadcastState();
+      },
+    },
+    {
+      label: tokenOn ? '停止命名隧道' : '启动命名隧道',
+      click: async () => {
+        const mgr = await ensureCloudflared();
+        if (tokenOn) mgr.stopToken();
+        else await mgr.startToken();
         updateTrayMenu();
         broadcastState();
       },
@@ -415,8 +599,13 @@ function publicState() {
       adminUser: config.webUser,
     },
     cloudflare: cloudflared
-      ? { ...cloudflared.state(), disclaimerDontRemind: !!config.disclaimerDontRemind }
-      : { disclaimerDontRemind: !!config.disclaimerDontRemind },
+      ? {
+          ...cloudflared.state(),
+          disclaimerDontRemind: !!config.disclaimerDontRemind,
+          autoQuick: !!config.cloudflare.autoQuick,
+          autoToken: !!config.cloudflare.autoToken,
+        }
+      : { disclaimerDontRemind: !!config.disclaimerDontRemind, autoQuick: !!config.cloudflare.autoQuick, autoToken: !!config.cloudflare.autoToken },
     about: {
       name: 'WebPrint 打印助手',
       productName: 'WebPrintTray',
@@ -448,6 +637,67 @@ async function shutdown() {
 // ---------- IPC ----------
 function registerIpc() {
   ipcMain.handle('state:get', () => publicState());
+
+  // 检查 / 安装更新
+  ipcMain.handle('update:check', async () => {
+    try {
+      const rel = await fetchJson(RELEASES_LATEST_API);
+      const current = app.getVersion();
+      const tag = rel.tag_name || '';
+      const latest = String(tag).replace(/^v/i, '');
+      const assets = rel.assets || [];
+      const setupAsset = assets.find((a) => /Setup.*\.exe$/i.test(a.name));
+      const zipAsset = assets.find((a) => /-x64\.zip$/i.test(a.name));
+      return {
+        ok: true,
+        current,
+        latest,
+        hasUpdate: isNewer(tag, current),
+        releaseUrl: rel.html_url,
+        notes: String(rel.body || '').slice(0, 3000),
+        setupUrl: setupAsset ? setupAsset.browser_download_url : '',
+        zipUrl: zipAsset ? zipAsset.browser_download_url : '',
+        kind: installKind(),
+      };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('update:install', async (event, opts = {}) => {
+    if (!app.isPackaged) return { ok: false, error: '开发模式下不支持自动更新' };
+    const kind = installKind();
+    try {
+      if (kind === 'installed') {
+        if (!opts.setupUrl) return { ok: false, error: '未找到安装包资源，请前往发布页手动更新' };
+        const dest = path.join(os.tmpdir(), 'WebPrintTray-Setup-update.exe');
+        await downloadWithMirrors(opts.setupUrl, dest, { exe: true });
+        quitting = true;
+        await shutdown();
+        spawn(dest, ['/S'], { detached: true, stdio: 'ignore' }).unref();
+        setTimeout(() => app.quit(), 800);
+        return { ok: true, action: 'installer' };
+      }
+      if (kind === 'green') {
+        if (!opts.zipUrl) return { ok: false, error: '未找到绿色版资源，请前往发布页手动更新' };
+        const zip = path.join(os.tmpdir(), 'WebPrintTray-update.zip');
+        await downloadWithMirrors(opts.zipUrl, zip);
+        const extractDir = path.join(os.tmpdir(), `WebPrintTray-extract-${Date.now()}`);
+        fs.rmSync(extractDir, { recursive: true, force: true });
+        fs.mkdirSync(extractDir, { recursive: true });
+        await extractZip(zip, extractDir);
+        const script = writeUpdateScript(extractDir, path.dirname(process.execPath), process.execPath);
+        quitting = true;
+        await shutdown();
+        spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script], { detached: true, stdio: 'ignore' }).unref();
+        setTimeout(() => app.quit(), 800);
+        return { ok: true, action: 'replace' };
+      }
+      return { ok: false, error: '当前运行方式不支持自动更新，请前往发布页手动更新' };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
 
   // 打印服务
   ipcMain.handle('service:start', async () => {
@@ -526,33 +776,38 @@ function registerIpc() {
     config.cloudflare = { ...config.cloudflare, ...(patch || {}) };
     saveConfig();
     if (!cloudflared) cloudflared = buildCloudflared();
-    const wasRunning = cloudflared.running;
-    if (wasRunning) {
-      cloudflared.stop();
-      cloudflared.setConfig(config.cloudflare);
-      await cloudflared.start();
-    } else {
-      cloudflared.setConfig(config.cloudflare);
-    }
+    cloudflared.setConfig(config.cloudflare);
     updateTrayMenu();
     return { ok: true, state: publicState() };
   });
-  ipcMain.handle('cloudflare:start', async () => {
+  ipcMain.handle('cloudflare:quick-start', async () => {
     const mgr = await ensureCloudflared();
     mgr.setConfig(config.cloudflare);
-    await mgr.start();
+    await mgr.startQuick();
     updateTrayMenu();
     return { ok: true, state: publicState() };
   });
-  ipcMain.handle('cloudflare:stop', async () => {
-    if (cloudflared) cloudflared.stop();
+  ipcMain.handle('cloudflare:quick-stop', async () => {
+    if (cloudflared) cloudflared.stopQuick();
     updateTrayMenu();
     return { ok: true, state: publicState() };
   });
-  ipcMain.handle('cloudflare:restart', async () => {
+  ipcMain.handle('cloudflare:quick-restart', async () => {
     const mgr = await ensureCloudflared();
     mgr.setConfig(config.cloudflare);
-    await mgr.restart();
+    await mgr.restartQuick();
+    updateTrayMenu();
+    return { ok: true, state: publicState() };
+  });
+  ipcMain.handle('cloudflare:token-start', async () => {
+    const mgr = await ensureCloudflared();
+    mgr.setConfig(config.cloudflare);
+    await mgr.startToken();
+    updateTrayMenu();
+    return { ok: true, state: publicState() };
+  });
+  ipcMain.handle('cloudflare:token-stop', async () => {
+    if (cloudflared) cloudflared.stopToken();
     updateTrayMenu();
     return { ok: true, state: publicState() };
   });
@@ -584,16 +839,16 @@ function registerIpc() {
     return { ok: true, path: result.filePaths[0] };
   });
   ipcMain.handle('cloudflare:download', async () => {
-    try {
-      const dest = path.join(dataDir(), 'cloudflared.exe');
-      await downloadFile(CLOUDFLARED_DOWNLOAD, dest);
-      config.cloudflare.cloudflaredPath = dest;
-      saveConfig();
-      if (cloudflared) cloudflared.setConfig(config.cloudflare);
-      return { ok: true, path: dest, state: publicState() };
-    } catch (err) {
-      return { ok: false, error: `下载 cloudflared 失败：${err.message}` };
+    const res = await downloadCloudflaredFile();
+    if (!res.ok) {
+      return { ok: false, error: `下载 cloudflared 失败。${res.error}。可点「下载页」手动下载后用「浏览」指定路径。` };
     }
+    config.cloudflare.cloudflaredPath = res.path;
+    saveConfig();
+    if (!cloudflared) cloudflared = buildCloudflared();
+    cloudflared.setConfig(config.cloudflare);
+    updateTrayMenu();
+    return { ok: true, path: res.path, source: res.source, state: publicState() };
   });
   ipcMain.handle('cloudflare:open-download', async () => {
     await shell.openExternal('https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/');
@@ -642,7 +897,8 @@ if (!gotLock) {
       logLine('Web 服务启动失败:', err && err.stack ? err.stack : err);
       dialog.showErrorBox('Web 服务启动失败', `${(err && err.message) || err}\n\n请在界面中修改 Web 端口后重试。`);
     }
-    if (config.cloudflare.autoStart) cloudflared.start().catch(() => {});
+    if (config.cloudflare.autoQuick) cloudflared.startQuick().catch(() => {});
+    if (config.cloudflare.autoToken) cloudflared.startToken().catch(() => {});
     updateTrayMenu();
   });
 

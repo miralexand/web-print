@@ -7,5 +7,6 @@ data/*
 !data/.gitkeep
 desktop/release/
 desktop/server/
+token/
 .env
 *.log

@@ -277,7 +277,7 @@ function createWindow() {
     mainWindow.webContents.on('did-finish-load', async () => {
       try {
         const info = await mainWindow.webContents.executeJavaScript(
-          "Array.from(document.querySelectorAll('main section')).map(s => ({ title: (s.querySelector('h1')||{}).textContent || '?', len: s.innerHTML.length, shown: getComputedStyle(s).display }))"
+          "({ sections: Array.from(document.querySelectorAll('main section')).map(s => ({ title: (s.querySelector('h1')||{}).textContent || '?', len: s.innerHTML.length, shown: getComputedStyle(s).display })), hasDialog: !!document.querySelector('.dlg-mask'), dialogInsideApp: !!document.querySelector('#app .dlg-mask') || !document.querySelector('.dlg-mask') })"
         );
         logLine('渲染诊断:', JSON.stringify(info));
       } catch (err) {

@@ -40,7 +40,7 @@
 
 - **一体化、零依赖**：一个桌面应用同时提供网页打印服务与本地打印，双击即用，无需任何额外服务。
 - **文档转换双保险**：默认使用 **WPS 的 COM 转换**，失败时自动切换 **Microsoft Office 的 COM 转换**，无需另装转换工具。
-- **Apple · 北欧极简 UI**：桌面端与网页端同一套设计语言（大圆角、柔和阴影、Apple 蓝、统一图标）。
+- **统一界面**：桌面端与网页端采用同一套界面规范（圆角卡片、柔和阴影、统一主色与图标）。
 - **双通道访问**：局域网直接用 `http://本机IP:3000`；外网用 Cloudflare Tunnel，快速隧道支持**关闭 / 刷新重建**。
 - **完备的账号与配额**：游客默认每 3 小时 5 次；管理员可增删改用户并设置每人配额。
 - **可靠的任务队列**：顺序执行、状态实时可见、失败自动重试、配额自动退还、任务可删除。
@@ -67,7 +67,7 @@
 | 层 | 技术 |
 | --- | --- |
 | 桌面外壳 | **Electron 31**（原生标题栏 / 托盘 / IPC / 自动更新友好） |
-| 界面 | **Vue 3 + Element Plus**，Apple / 北欧极简风格（桌面端与网页端统一） |
+| 界面 | **Vue 3 + Element Plus**（桌面端与网页端统一设计） |
 | 网页服务 | **Node.js 20 + Express**，`express-session` 会话、`multer` 上传 |
 | 数据存储 | 本地 JSON 原子写入（用户、用量、任务），`scrypt` 密码哈希 |
 | 打印 | **pdf-to-printer**（内置 SumatraPDF，调用 Windows 打印驱动） |
@@ -212,7 +212,7 @@ web-print/
 │   ├── preload.js
 │   ├── lib/printService.js    # 本地打印 + WPS/Office 转换
 │   ├── lib/cloudflared.js     # Cloudflare Tunnel 管理
-│   ├── renderer/              # Apple 风格界面（Vue3 + Element Plus）
+│   ├── renderer/              # 图形界面（Vue3 + Element Plus）
 │   ├── scripts/               # copy-server.js / copy-vendor.js / make-icons.js
 │   └── build/                 # 图标资源（icon.svg / icon.png / icon.ico / tray.png）
 ├── docs/                      # 教程与截图

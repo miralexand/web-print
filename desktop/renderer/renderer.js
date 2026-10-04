@@ -220,8 +220,7 @@ const app = createApp({
       }
     }
 
-    async function restartTunnel() {
-      if (!(await ensureQuickDisclaimer())) return;
+    async function stopTunnel() {
       busy.tunnel = true;
       try {
         const res = await window.trayApi.tunnelStop();

@@ -1,7 +1,7 @@
 'use strict';
 
 const { createApp, reactive, ref, computed, onMounted } = Vue;
-const { ElMessage } = ElementPlus;
+const { ElMessage, ElMessageBox } = ElementPlus;
 
 const app = createApp({
   setup() {
@@ -44,6 +44,7 @@ const app = createApp({
       cloudflaredPath: '',
       resolvedPath: '',
       managedByService: false,
+      quickDisclaimerAccepted: false,
       service: { installed: false, running: false },
     });
 
@@ -100,6 +101,7 @@ const app = createApp({
         tunnel.cloudflaredPath = s.cloudflare.cloudflaredPath;
         tunnel.resolvedPath = s.cloudflare.resolvedPath;
         tunnel.managedByService = s.cloudflare.managedByService;
+        tunnel.quickDisclaimerAccepted = !!s.cloudflare.quickDisclaimerAccepted;
         tunnel.service = s.cloudflare.service || { installed: false, running: false };
       }
       if (!initialized.value) {
@@ -168,7 +170,24 @@ const app = createApp({
       }
     }
 
+    async function ensureQuickDisclaimer() {
+      if (tunnelForm.mode !== 'quick' || tunnel.quickDisclaimerAccepted) return true;
+      try {
+        await ElMessageBox.confirm(
+          '快速隧道由 Cloudflare 免费提供，公网地址随机且不固定，可能随时失效、中断或无法访问，可用性不作任何保证。请勿用于机密或敏感文件。因使用快速隧道产生的任何风险与后果，均由使用者自行承担。',
+          '快速隧道免责声明',
+          { confirmButtonText: '我已阅读并同意', cancelButtonText: '取消', type: 'warning', dangerouslyUseHTMLString: false }
+        );
+      } catch (_) {
+        return false;
+      }
+      const res = await window.trayApi.tunnelAcceptDisclaimer();
+      if (res && res.state) syncState(res.state);
+      return true;
+    }
+
     async function saveTunnel(start) {
+      if (start && !(await ensureQuickDisclaimer())) return;
       busy.tunnel = true;
       try {
         if (start) await window.trayApi.tunnelStop();
@@ -191,6 +210,7 @@ const app = createApp({
     }
 
     async function startTunnel() {
+      if (!(await ensureQuickDisclaimer())) return;
       busy.tunnel = true;
       try {
         const res = await window.trayApi.tunnelStart();
@@ -200,7 +220,8 @@ const app = createApp({
       }
     }
 
-    async function stopTunnel() {
+    async function restartTunnel() {
+      if (!(await ensureQuickDisclaimer())) return;
       busy.tunnel = true;
       try {
         const res = await window.trayApi.tunnelStop();

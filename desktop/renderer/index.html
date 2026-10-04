@@ -178,6 +178,9 @@
                 <el-input v-model="tunnelForm.url" placeholder="http://127.0.0.1:3000" />
                 <div class="hint">默认指向本机 Web 打印服务</div>
               </el-form-item>
+              <el-form-item v-if="tunnelForm.mode === 'quick'" label="免责声明">
+                <div class="hint">快速隧道由 Cloudflare 免费提供，公网地址随机且可能随时失效、中断或无法访问，可用性不作保证；请勿用于机密或敏感文件，使用快速隧道产生的风险与后果由使用者自行承担。</div>
+              </el-form-item>
               <el-form-item v-else label="Tunnel Token">
                 <el-input v-model="tunnelForm.token" type="password" show-password placeholder="粘贴以 eyJ 开头的 Token，或直接粘贴 cloudflared service install eyJ... 整条命令" />
                 <div class="hint">会自动提取其中的 Token；即使已用「服务方式」安装过，也可在此粘贴同一条命令。</div>

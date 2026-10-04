@@ -88,6 +88,8 @@ class CloudflaredManager {
     this.serviceStatus = { installed: false, running: false };
     this.onChange = options.onChange || (() => {});
     this._urlTimer = null;
+    this._quickRetries = 0;
+    this._stopping = false;
     this._poll = setInterval(() => this.refreshService(), 5000);
   }
 
@@ -153,7 +155,9 @@ class CloudflaredManager {
     }
   }
 
-  async start() {
+  async start(opts = {}) {
+    if (!opts.auto) this._quickRetries = 0;
+    this._stopping = false;
     this.error = '';
     this.url = '';
     this.clearUrlTimer();
@@ -179,10 +183,11 @@ class CloudflaredManager {
     const exe = this.resolvedPath();
     let args;
     if (this.config.mode === 'token') {
-      args = ['tunnel', 'run', '--token', this.config.token, '--no-autoupdate'];
+      args = ['tunnel', 'run', '--token', this.config.token, '--no-autoupdate', '--edge-ip-version', '4'];
     } else {
       const target = this.config.url || 'http://127.0.0.1:3000';
-      args = ['tunnel', '--url', target, '--no-autoupdate'];
+      // --edge-ip-version 4：在部分存在 IPv6 问题的网络下可显著提升快速隧道成功率
+      args = ['tunnel', '--url', target, '--no-autoupdate', '--edge-ip-version', '4'];
     }
 
     this.log(`启动命令：${exe} ${args.map((a) => (a.includes(' ') ? `"${a}"` : a)).join(' ')}`);
@@ -221,6 +226,7 @@ class CloudflaredManager {
       if (matches && matches.length) {
         this.url = matches[matches.length - 1];
         this.starting = false;
+        this._quickRetries = 0;
         this.clearUrlTimer();
         this.onChange();
       }
@@ -242,17 +248,30 @@ class CloudflaredManager {
 
     this.proc.on('close', (code) => {
       const wasQuick = this.config.mode === 'quick';
+      const hadUrl = !!this.url;
       this.running = false;
       this.starting = false;
       this.proc = null;
+      this.url = '';
       this.clearUrlTimer();
       if (!this.spawnFailed) {
-        if (code !== 0 && !this.url) {
-          this.error = wasQuick
-            ? '快速隧道未能建立（可能无法访问互联网或被网络限制），请点击「刷新重建」重试。'
-            : `cloudflared 已退出（退出码 ${code}），请查看下方日志。常见原因：Token 无效、隧道未配置 Public Hostname，或网络不可用。`;
-        } else if (wasQuick && !this.url) {
-          this.error = '快速隧道未生成公网地址，请点击「刷新重建」重试。';
+        if (wasQuick) {
+          if (this._stopping) {
+            /* 用户主动关闭，不重试 */
+          } else if (this._quickRetries < 3) {
+            this._quickRetries += 1;
+            this.error = '';
+            this.log(`快速隧道中断，3 秒后自动重建（第 ${this._quickRetries}/3 次）…`);
+            this.onChange();
+            setTimeout(() => {
+              if (!this.running && !this._stopping) this.start({ auto: true });
+            }, 3000);
+            return;
+          } else {
+            this.error = '快速隧道多次中断，已停止自动重建，请点击「刷新重建」重试。';
+          }
+        } else if (code !== 0 && !hadUrl) {
+          this.error = `cloudflared 已退出（退出码 ${code}），请查看下方日志。常见原因：Token 无效、隧道未配置 Public Hostname，或网络不可用。`;
         }
       }
       this.log(`cloudflared 已退出，退出码 ${code}`);
@@ -263,8 +282,10 @@ class CloudflaredManager {
   }
 
   stop() {
+    this._stopping = true;
     this.clearUrlTimer();
     this.starting = false;
+    this._quickRetries = 0;
     if (this.managedByService && !this.proc) {
       this.log('隧道由 Windows 系统服务托管，已停止应用内管理；如需彻底停止请在服务管理器停止 cloudflared 服务，或点击“卸载系统服务”。');
       this.managedByService = false;

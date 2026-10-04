@@ -33,6 +33,7 @@ let config = {
   sessionSecret: '',
   sofficePath: '',
   autoStart: false,
+  quickDisclaimerAccepted: false,
   cloudflare: {
     mode: 'quick',
     url: 'http://127.0.0.1:3000',
@@ -416,7 +417,9 @@ function publicState() {
       lanUrls: (config.allowLan ? lanAddresses() : []).map((ip) => `http://${ip}:${config.webPort}`),
       adminUser: config.webUser,
     },
-    cloudflare: cloudflared ? cloudflared.state() : null,
+    cloudflare: cloudflared
+      ? { ...cloudflared.state(), quickDisclaimerAccepted: !!config.quickDisclaimerAccepted }
+      : { quickDisclaimerAccepted: !!config.quickDisclaimerAccepted },
     about: {
       name: 'WebPrint 打印助手',
       productName: 'WebPrintTray',
@@ -555,6 +558,11 @@ function registerIpc() {
     mgr.setConfig(config.cloudflare);
     await mgr.restart();
     updateTrayMenu();
+    return { ok: true, state: publicState() };
+  });
+  ipcMain.handle('cloudflare:accept-disclaimer', async () => {
+    config.quickDisclaimerAccepted = true;
+    saveConfig();
     return { ok: true, state: publicState() };
   });
   ipcMain.handle('cloudflare:service-install', async () => {

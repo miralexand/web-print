@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('trayApi', {
   tunnelStart: () => ipcRenderer.invoke('cloudflare:start'),
   tunnelStop: () => ipcRenderer.invoke('cloudflare:stop'),
   tunnelRestart: () => ipcRenderer.invoke('cloudflare:restart'),
+  tunnelAcceptDisclaimer: () => ipcRenderer.invoke('cloudflare:accept-disclaimer'),
   tunnelSave: (patch) => ipcRenderer.invoke('cloudflare:save', patch),
   tunnelPick: () => ipcRenderer.invoke('cloudflare:pick'),
   tunnelDownload: () => ipcRenderer.invoke('cloudflare:download'),

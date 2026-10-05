@@ -25,6 +25,12 @@
 
 ![网页端](docs/screenshots/web-home.png)
 
+**安卓客户端（扫码接入 · 分享面板打印 · 页面预览）**
+
+| 扫码添加 | WebView 网页 | 分享文件 |
+| :--: | :--: | :--: |
+| <img src="android-client/docs/screenshots/04-qr-scanner.png" width="220" /> | <img src="android-client/docs/screenshots/06-https-page.png" width="220" /> | <img src="android-client/docs/screenshots/09-share-file.png" width="220" /> |
+
 ## 快速开始
 
 1. 打开 [Releases](https://github.com/miralexand/web-print/releases) 下载：
@@ -50,6 +56,7 @@
 - **贴心的打印选项**：上传即时**文档预览**、**移除重选**、**起止页码**、份数、黑白/彩色、纸张、指定打印机。
 - **托盘常驻**：关闭窗口最小化到系统托盘，托盘菜单可开关各服务。
 - **安卓客户端（薄壳）**：扫码即可添加服务器（支持多台机器），任意 App 里「分享 → 打印助手」直接打印；
+  分享前可**预览页面并选择起止页码与份数**，「关于」页可**检查更新并在应用内安装**；
   仅允许 HTTPS 隧道连接，APK 由 GitHub Actions 构建，见 [`android-client/`](./android-client/README.md)。
 
 ## 功能特性
@@ -66,6 +73,7 @@
 - **托盘与自启**：托盘常驻、开机自启、随程序启动隧道
 - **安装与更新**：安装版通过安装包覆盖升级，绿色版解压覆盖升级；「关于」页可检查更新并一键更新
 - **关于页**：版本、仓库地址、问题反馈、**检查更新**（发现新版本可**一键覆盖更新**或前往发布页）、开源协议
+- **安卓客户端**：多服务器扫码接入、分享面板直接打印、PDF/图片**页面预览 + 起止页码**、关于页**检查更新并在应用内下载安装**
 
 ## 技术栈
 
@@ -119,6 +127,27 @@ WebPrintTray（单个 Electron 应用）
 - **移除重选**：选错文件点「移除并重选」
 - **打印参数**：起止页码、份数、色彩、纸张、指定打印机
 - **任务列表**：状态与错误、创建时间，可**删除**（等待中的会退还配额）
+
+## 安卓客户端（APK）
+
+面向「多台打印主机、手机扫码接入」的薄壳 WebView 客户端，**仅允许 HTTPS** 连接（须先启用 Cloudflare 隧道）。
+
+- **多服务器管理**：手动 / 扫码添加，可起中文别名，一键切换；服务器地址也可在任意扫码 App 中识别。
+- **分享面板打印**：在微信、相册、文件管理器里「分享 → 打印助手」直接打印，无需先打开 App；支持文字、PDF、图片、Office、txt，以及一次分享多个文件。
+- **页面预览与页码**：分享单个 PDF / 图片时可预览页面缩略图，点按选择或直接填写「第 X 页 至 第 Y 页」，并设置份数后再提交。
+- **检查更新**：「关于」页展示版本与仓库地址，可检查更新并**在应用内下载、安装**新版 APK。
+- **安全**：只接受 `https://` 地址，平台层禁止明文流量；证书无法验证时由用户显式确认（默认取消）。
+
+| 服务器列表 | 扫码添加 | 手机接入二维码 | WebView 网页 |
+| :--: | :--: | :--: | :--: |
+| <img src="android-client/docs/screenshots/01-servers-empty.png" width="200" /> | <img src="android-client/docs/screenshots/04-qr-scanner.png" width="200" /> | <img src="android-client/docs/screenshots/07-qr-tunnel-address.png" width="200" /> | <img src="android-client/docs/screenshots/06-https-page.png" width="200" /> |
+
+| 分享文字 | 分享文件 | 提交成功 |
+| :--: | :--: | :--: |
+| <img src="android-client/docs/screenshots/08-share-text.png" width="200" /> | <img src="android-client/docs/screenshots/09-share-file.png" width="200" /> | <img src="android-client/docs/screenshots/10-share-uploaded.png" width="200" /> |
+
+APK 从 [Releases](https://github.com/miralexand/web-print/releases) 下载（`WebPrintClient-<版本>.apk`）。
+详细使用、构建、版本号与发布说明见 [`android-client/README.md`](./android-client/README.md)。
 
 ## Cloudflare Tunnel 傻瓜教程
 
@@ -222,8 +251,12 @@ web-print/
 │   ├── renderer/              # 图形界面（Vue3 + Element Plus）
 │   ├── scripts/               # copy-server.js / copy-vendor.js / make-icons.js
 │   └── build/                 # 图标资源（icon.svg / icon.png / icon.ico / tray.png）
-├── android-client/            # 安卓客户端（薄壳 WebView，仅 HTTPS + 分享面板打印）
+├── android-client/            # 安卓客户端（薄壳 WebView，仅 HTTPS + 分享面板打印 + 页面预览）
 │   ├── app/src/main/java/com/webprint/client/
+│   │   ├─ MainActivity.java     # WebView 壳 + 关于/检查更新
+│   │   ├─ ShareActivity.java    # 分享确认页（预览 + 起止页码 + 份数）
+│   │   └─ UpdateManager.java    # GitHub Releases 检查更新与 APK 下载
+│   ├── docs/screenshots/      # 应用截图
 │   ├── scripts/version.js     # versionName -> versionCode 推导
 │   └── README.md              # 构建、版本号与发布说明
 ├── docs/                      # 教程与截图

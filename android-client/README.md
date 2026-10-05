@@ -11,6 +11,23 @@
 
 ---
 
+## 界面预览
+
+> 以下截图来自 Android 14 模拟器实测。分享确认页自 v2.2.1 起新增「页面预览 + 起止页码」，
+> 见下方 [分享面板打印](#分享面板打印)。
+
+| 服务器列表 | 扫码添加 | 证书确认 |
+| :--: | :--: | :--: |
+| <img src="docs/screenshots/01-servers-empty.png" width="220" /> | <img src="docs/screenshots/04-qr-scanner.png" width="220" /> | <img src="docs/screenshots/06-ssl-confirm.png" width="220" /> |
+
+| 手机接入二维码 | WebView 网页 | 分享文件 |
+| :--: | :--: | :--: |
+| <img src="docs/screenshots/07-qr-tunnel-address.png" width="220" /> | <img src="docs/screenshots/06-https-page.png" width="220" /> | <img src="docs/screenshots/09-share-file.png" width="220" /> |
+
+| 分享文字 | 提交成功（文字） | 提交成功（文件） |
+| :--: | :--: | :--: |
+| <img src="docs/screenshots/08-share-text.png" width="220" /> | <img src="docs/screenshots/10-share-uploaded.png" width="220" /> | <img src="docs/screenshots/11-share-file-uploaded.png" width="220" /> |
+
 ## 功能
 
 | 功能 | 说明 |
@@ -20,6 +37,8 @@
 | 网页界面 | WebView 加载服务端网页，支持登录、上传文件、查看任务 |
 | 文件上传 | 已实现 `onShowFileChooser`，网页里的「点击选择文件」在壳内可用 |
 | **分享面板打印** | 在微信/相册/文件管理器里「分享 → 打印助手」即可直接打印，无需先打开 App |
+| **页面预览与页码** | 分享单个 PDF / 图片时预览页面缩略图，点按选择或填写「第 X 页 至 第 Y 页」，并设置份数 |
+| **检查更新 / 在线安装** | 「关于」页显示版本与仓库地址，可检查更新并在应用内下载、安装新版 APK |
 | **仅允许 HTTPS** | 只接受 `https://` 地址；`http://` 会被拒绝，且系统层面禁止明文流量 |
 | 证书确认 | 证书无法验证时弹窗让用户决定「继续 / 取消」，取消为默认安全分支 |
 | 中文界面 | 全部界面文案在 `res/values/strings.xml` |
@@ -45,13 +64,32 @@
 - 支持的分享内容：**文字**（`text/plain`）、**文件**（PDF / 图片 / Word / Excel / PPT / txt），
   以及一次分享**多个文件**（`ACTION_SEND_MULTIPLE`）。
 - 打开后会有一个**确认页**：显示「即将打印」的内容（文件名+大小，或文字摘要）、
-  服务器（多个服务器时为下拉选择）、份数，然后是「打印 / 取消」。
+  服务器（多个服务器时为下拉选择）、**页码与份数**，然后是「打印 / 取消」。
+- **页面预览与起止页码**：单个 PDF 用框架 `PdfRenderer` 渲染页面缩略图（最多 20 页），
+  点按缩略图依次选择起始页 / 结束页（选中页高亮），也可直接填写「起始页 至 结束页」或点「全部」；
+  单个图片直接预览。页码越界或格式错误会在提交前提示。批量分享与纯文本不做页码选择。
 - 打印按钮会把内容上传到服务器，成功后显示 `已提交打印（OK task=<任务号>），剩余 N 次`。
 - 上传时**复用 WebView 的登录会话**（读取同一个 Cookie），因此登录状态下按用户配额计，
   未登录则按游客配额计。
 - 不会重复上传：一次批量全部成功后按钮会被禁用。
 
 > 服务端错误会原样显示，例如配额用尽时是「打印次数已用完（HTTP 429）：…」。
+
+## 关于与检查更新
+
+菜单 →「关于」，对话框展示应用名称、当前版本、可点击的**开源仓库地址**，以及三个按钮：
+
+- **打开仓库**：跳转到 <https://github.com/miralexand/web-print>。
+- **检查更新**：请求 GitHub `releases/latest`，对比 `versionName`。
+  - 有新版本时展示版本号与更新说明，可「下载并安装」或「稍后」。
+  - 下载走 GitHub 直连，失败依次回退镜像（ghproxy.net / gh-proxy.com / ghfast.top）。
+  - 安装包下载到应用私有目录 `files/updates/`，再经内置 `CaptureFileProvider`
+    的 `content://` URI 交给系统安装器。
+  - Android 8.0+ 若未授予「安装未知应用」权限，会先引导到系统设置页，返回后自动继续安装。
+- **关闭**：关闭对话框。
+
+实现见 [`UpdateManager.java`](app/src/main/java/com/webprint/client/UpdateManager.java)。
+更新源地址与桌面端一致，Release 中的 APK 命名为 `WebPrintClient-<版本>.apk`。
 
 ## 构建
 
@@ -98,24 +136,24 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 客户端版本**只有一个来源**：[`gradle.properties`](gradle.properties)
 
 ```properties
-webprint.versionName=2.2.0
-webprint.versionCode=20200
+webprint.versionName=2.2.2
+webprint.versionCode=20202
 ```
 
 - `versionName` 会显示在 App 菜单的「关于」对话框里
-- `versionCode` 必须单调递增，约定 `major*10000 + minor*100 + patch`（2.2.0 → 20200）
+- `versionCode` 必须单调递增，约定 `major*10000 + minor*100 + patch`（2.2.2 → 20202）
 
-打 tag 发布时 **CI 会用 tag 覆盖这两项**（tag `v2.2.0` → `2.2.0` / `20200`），
+打 tag 发布时 **CI 会用 tag 覆盖这两项**（tag `v2.2.2` → `2.2.2` / `20202`），
 所以正式 APK 的版本号始终等于 tag，不会出现本地版本与发布版本对不上的情况。
 
 换算逻辑放在 [`scripts/version.js`](scripts/version.js)，可以本地直接运行：
 
 ```bat
-node scripts\version.js 2.2.0          :: 输出 name=2.2.0 与 code=20200
-node scripts\version.js 2.2.0 --code   :: 只输出 20200
+node scripts\version.js 2.2.2          :: 输出 name=2.2.2 与 code=20202
+node scripts\version.js 2.2.2 --code   :: 只输出 20202
 ```
 
-也支持 `2.2.0-beta` 这类预发布后缀：后缀保留在 `versionName`，`versionCode` 取数字部分。
+也支持 `2.2.2-beta` 这类预发布后缀：后缀保留在 `versionName`，`versionCode` 取数字部分。
 
 ### GitHub Actions 自动构建
 
@@ -151,8 +189,8 @@ cd android-client
 gradlew.bat assembleDebug
 
 :: 2. 打 tag 并推送（同时触发桌面端与安卓端构建）
-git tag v2.2.0
-git push origin v2.2.0
+git tag v2.2.2
+git push origin v2.2.2
 ```
 
 ## 技术选型
@@ -163,7 +201,7 @@ git push origin v2.2.0
 | UI 框架 | **无**（框架原生控件，代码内构建界面） | 避免 AndroidX / AppCompat / Material 依赖，APK 更小、构建更稳 |
 | 依赖 | **仅 `com.google.zxing:core:3.5.3`** | 只用于二维码解码，纯 Java，无 Android 依赖 |
 | minSdk / targetSdk | 24 / 34 | 覆盖 Android 7.0 及以上 |
-| APK 体积 | 约 **345 KB** | — |
+| APK 体积 | 约 **285 KB**（release 签名包），debug 约 360 KB | — |
 
 ## 目录结构
 
@@ -178,12 +216,14 @@ android-client/
    └─ src/main/
       ├─ AndroidManifest.xml
       ├─ java/com/webprint/client/
-      │  ├─ MainActivity.java          # WebView 壳：菜单、进度、错误页、文件选择
+      │  ├─ MainActivity.java          # WebView 壳：菜单、进度、错误页、文件选择、关于/检查更新
       │  ├─ ServersActivity.java       # 服务器列表：手动添加 / 扫码添加 / 切换 / 删除
       │  ├─ ScanActivity.java          # 相机预览 + ZXing 解码
-      │  ├─ ShareActivity.java         # 分享面板入口：解析分享内容 + 确认页 + 上传
+      │  ├─ ShareActivity.java         # 分享面板入口：解析分享内容 + 确认页（预览/页码/份数）+ 上传
       │  ├─ ServerStore.java           # SharedPreferences 持久化 + 地址规范化
-      │  └─ CaptureFileProvider.java   # 供网页「拍照」用的 ContentProvider
+      │  ├─ UpdateManager.java         # GitHub Releases 检查更新 + APK 下载（含镜像回退）
+      │  ├─ Ui.java                    # 统一颜色 / 圆角卡片 / 按钮样式
+      │  └─ CaptureFileProvider.java   # 拍照与更新 APK 的 ContentProvider（captures/updates）
       └─ res/
          ├─ values/strings.xml         # 全部中文文案
          ├─ values/ids.xml             # 便于 UI 自动化测试的稳定控件 id

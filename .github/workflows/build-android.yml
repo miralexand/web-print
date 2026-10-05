@@ -39,16 +39,35 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: 安装 Android SDK 工具
-        uses: android-actions/setup-android@v3
-
-      - name: 接受许可并安装 SDK 组件
+      - name: 准备 Android SDK
         run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
+          set -euo pipefail
+          # GitHub 托管的 ubuntu runner 已预装 Android SDK 并接受过许可，
+          # 这里直接复用，不再依赖第三方 setup 动作。
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          if [[ -z "$SDK" || ! -d "$SDK" ]]; then
+            echo "找不到 Android SDK（ANDROID_SDK_ROOT / ANDROID_HOME 均未设置）" >&2
+            exit 1
+          fi
+          {
+            echo "ANDROID_SDK_ROOT=$SDK"
+            echo "ANDROID_HOME=$SDK"
+          } >> "$GITHUB_ENV"
+          echo "sdk.dir=$SDK" > local.properties
+          echo "使用 SDK：$SDK"
 
-      - name: 生成 SDK 路径配置
-        run: echo "sdk.dir=${ANDROID_SDK_ROOT:-$ANDROID_HOME}" > local.properties
+          # 缺少所需组件时尝试补装；失败也不中断，交给 Gradle 报出明确错误
+          SDKMANAGER="$(ls "$SDK"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -n 1 || true)"
+          if [[ -n "$SDKMANAGER" ]]; then
+            yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+            if [[ ! -d "$SDK/platforms/android-34" || ! -d "$SDK/build-tools/34.0.0" ]]; then
+              "$SDKMANAGER" "platforms;android-34" "build-tools;34.0.0" || true
+            fi
+          else
+            echo "未找到 sdkmanager，直接使用预装组件"
+          fi
+          echo "--- platforms ---"; ls "$SDK/platforms" 2>/dev/null || true
+          echo "--- build-tools ---"; ls "$SDK/build-tools" 2>/dev/null || true
 
       - name: 缓存 Gradle
         uses: actions/cache@v4

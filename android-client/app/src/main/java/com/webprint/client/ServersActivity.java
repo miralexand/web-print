@@ -63,7 +63,7 @@ public class ServersActivity extends Activity {
         TextView hint = new TextView(this);
         hint.setText(getString(R.string.servers_hint));
         hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        hint.setTextColor(0xFF757575);
+        hint.setTextColor(Ui.TEXT_MUTED);
         int pad = dp(16);
         hint.setPadding(pad, dp(8), pad, dp(8));
         root.addView(hint, new LinearLayout.LayoutParams(
@@ -72,7 +72,7 @@ public class ServersActivity extends Activity {
         mEmptyView = new TextView(this);
         mEmptyView.setText(getString(R.string.servers_empty));
         mEmptyView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        mEmptyView.setTextColor(0xFF9E9E9E);
+        mEmptyView.setTextColor(Ui.TEXT_FAINT);
         mEmptyView.setGravity(Gravity.CENTER);
         mEmptyView.setLineSpacing(dp(4), 1.0f);
         mEmptyView.setPadding(dp(32), dp(48), dp(32), dp(32));
@@ -131,12 +131,12 @@ public class ServersActivity extends Activity {
         TextView title = new TextView(this);
         title.setText(getString(R.string.servers_title));
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-        title.setTextColor(0xFF212121);
+        title.setTextColor(Ui.TEXT);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         bar.addView(title, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        Button manual = makeButton(getString(R.string.add_manual));
+        Button manual = Ui.primaryButton(this, getString(R.string.add_manual));
         manual.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -145,7 +145,7 @@ public class ServersActivity extends Activity {
         });
         bar.addView(manual);
 
-        Button scan = makeButton(getString(R.string.add_scan));
+        Button scan = Ui.ghostButton(this, getString(R.string.add_scan));
         scan.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -158,14 +158,6 @@ public class ServersActivity extends Activity {
         bar.addView(scan, scanLp);
 
         return bar;
-    }
-
-    private Button makeButton(String text) {
-        Button button = new Button(this);
-        button.setText(text);
-        button.setAllCaps(false);
-        button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        return button;
     }
 
     private void refresh() {
@@ -380,7 +372,7 @@ public class ServersActivity extends Activity {
 
                 TextView url = new TextView(ServersActivity.this);
                 url.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-                url.setTextColor(0xFF757575);
+                url.setTextColor(Ui.TEXT_MUTED);
                 url.setPadding(0, dp(2), 0, 0);
                 url.setTag("url");
                 row.addView(url);
@@ -398,7 +390,7 @@ public class ServersActivity extends Activity {
                 title = title + "  ·  " + getString(R.string.server_active_mark);
             }
             nameView.setText(title);
-            nameView.setTextColor(active ? 0xFF1A73E8 : 0xFF212121);
+            nameView.setTextColor(active ? Ui.PRIMARY : Ui.TEXT);
             urlView.setText(server.url);
             return row;
         }

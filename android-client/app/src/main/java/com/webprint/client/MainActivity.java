@@ -12,6 +12,7 @@ import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.MediaStore;
+import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -35,6 +36,7 @@ import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -76,6 +78,11 @@ public class MainActivity extends Activity {
 
     /** 当前显示的证书确认对话框；不为 null 表示已经有一个在等用户决定。 */
     private AlertDialog mSslDialog;
+
+    /** 下载完成、等待安装的更新包（用户去开启“未知来源”授权后回来继续安装）。 */
+    private File mPendingInstallApk;
+    private TextView mUpdateMessage;
+    private ProgressBar mUpdateBar;
 
     /** 网页 <input type="file"> 的回调，选中/取消后必须调用。 */
     private ValueCallback<Uri[]> mFilePathCallback;
@@ -125,6 +132,15 @@ public class MainActivity extends Activity {
         }
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 用户可能刚从「安装未知应用」设置页返回：有等待安装的包就继续安装
+        if (mPendingInstallApk != null) {
+            maybeInstallPending();
+        }
+    }
+
     // ------------------------------------------------------------------
     // 界面
     // ------------------------------------------------------------------
@@ -159,20 +175,20 @@ public class MainActivity extends Activity {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setGravity(Gravity.CENTER);
-        panel.setBackgroundColor(0xFFFAFAFA);
+        panel.setBackgroundColor(Ui.BG);
         int pad = dp(28);
         panel.setPadding(pad, pad, pad, pad);
 
         TextView title = new TextView(this);
         title.setText(getString(R.string.error_title));
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 19);
-        title.setTextColor(0xFF212121);
+        title.setTextColor(Ui.TEXT);
         title.setGravity(Gravity.CENTER);
         panel.addView(title);
 
         mErrorView = new TextView(this);
         mErrorView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        mErrorView.setTextColor(0xFF616161);
+        mErrorView.setTextColor(Ui.TEXT_MUTED);
         mErrorView.setGravity(Gravity.CENTER);
         mErrorView.setLineSpacing(dp(4), 1f);
         LinearLayout.LayoutParams errorLp = new LinearLayout.LayoutParams(
@@ -180,9 +196,7 @@ public class MainActivity extends Activity {
         errorLp.topMargin = dp(14);
         panel.addView(mErrorView, errorLp);
 
-        mRetryButton = new Button(this);
-        mRetryButton.setText(getString(R.string.retry));
-        mRetryButton.setAllCaps(false);
+        mRetryButton = Ui.primaryButton(this, getString(R.string.retry));
         mRetryButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -199,9 +213,7 @@ public class MainActivity extends Activity {
         retryLp.topMargin = dp(20);
         panel.addView(mRetryButton, retryLp);
 
-        Button switchServer = new Button(this);
-        switchServer.setText(getString(R.string.menu_switch_server));
-        switchServer.setAllCaps(false);
+        Button switchServer = Ui.ghostButton(this, getString(R.string.menu_switch_server));
         switchServer.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -402,22 +414,264 @@ public class MainActivity extends Activity {
     }
 
     private void showAbout() {
-        String version;
-        try {
-            version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
-        } catch (PackageManager.NameNotFoundException e) {
-            version = getString(R.string.unknown);
-        }
-        if (TextUtils.isEmpty(version)) {
-            version = getString(R.string.unknown);
-        }
+        final String version = appVersion();
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(20);
+        box.setPadding(pad, dp(8), pad, dp(4));
+
+        TextView name = new TextView(this);
+        name.setText(getString(R.string.app_name));
+        name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        name.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        name.setTextColor(Ui.TEXT);
+        box.addView(name);
+
+        TextView ver = new TextView(this);
+        ver.setText(getString(R.string.about_version, version));
+        ver.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        ver.setTextColor(Ui.TEXT_MUTED);
+        ver.setPadding(0, dp(2), 0, dp(12));
+        box.addView(ver);
+
+        TextView repoLabel = new TextView(this);
+        repoLabel.setText(getString(R.string.about_repo_label));
+        repoLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        repoLabel.setTextColor(Ui.TEXT_FAINT);
+        box.addView(repoLabel);
+
+        TextView repo = new TextView(this);
+        repo.setText(UpdateManager.REPO_URL);
+        repo.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        repo.setTextColor(Ui.PRIMARY);
+        repo.setPadding(0, dp(2), 0, dp(12));
+        repo.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openUrl(UpdateManager.REPO_URL);
+            }
+        });
+        box.addView(repo);
+
+        TextView body = new TextView(this);
+        body.setText(getString(R.string.about_body));
+        body.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        body.setTextColor(Ui.TEXT_MUTED);
+        body.setLineSpacing(dp(3), 1f);
+        box.addView(body);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(box, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
         new AlertDialog.Builder(this)
                 .setTitle(getString(R.string.about_title))
-                .setMessage(getString(R.string.app_name) + "\n"
-                        + getString(R.string.about_version, version) + "\n\n"
-                        + getString(R.string.about_body))
-                .setPositiveButton(getString(R.string.ok), null)
+                .setView(scroll)
+                .setPositiveButton(getString(R.string.about_check_update),
+                        new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                checkForUpdates();
+                            }
+                        })
+                .setNeutralButton(getString(R.string.about_open_repo),
+                        new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                openUrl(UpdateManager.REPO_URL);
+                            }
+                        })
+                .setNegativeButton(getString(R.string.about_close), null)
                 .show();
+    }
+
+    private String appVersion() {
+        try {
+            String version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            return TextUtils.isEmpty(version) ? getString(R.string.unknown) : version;
+        } catch (PackageManager.NameNotFoundException e) {
+            return getString(R.string.unknown);
+        }
+    }
+
+    private void openUrl(String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this, R.string.no_browser, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 检查更新 / 下载安装
+    // ------------------------------------------------------------------
+
+    private void checkForUpdates() {
+        final AlertDialog progress = new AlertDialog.Builder(this)
+                .setMessage(getString(R.string.update_checking))
+                .setCancelable(false)
+                .create();
+        progress.show();
+        UpdateManager.check(appVersion(), new UpdateManager.CheckCallback() {
+            @Override
+            public void onUpdateAvailable(UpdateManager.UpdateInfo info) {
+                dismissSafe(progress);
+                showUpdateDialog(info);
+            }
+
+            @Override
+            public void onUpToDate(String current) {
+                dismissSafe(progress);
+                Toast.makeText(MainActivity.this, getString(R.string.update_latest, current),
+                        Toast.LENGTH_LONG).show();
+            }
+
+            @Override
+            public void onError(String message) {
+                dismissSafe(progress);
+                Toast.makeText(MainActivity.this, getString(R.string.update_failed, message),
+                        Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void showUpdateDialog(final UpdateManager.UpdateInfo info) {
+        String notes = info.notes == null ? "" : info.notes.trim();
+        if (notes.length() > 600) {
+            notes = notes.substring(0, 600) + "…";
+        }
+        StringBuilder message = new StringBuilder(
+                getString(R.string.update_found_message, appVersion(), info.version));
+        if (!notes.isEmpty()) {
+            message.append("\n\n").append(getString(R.string.update_notes_title))
+                    .append('\n').append(notes);
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.update_found_title))
+                .setMessage(message.toString())
+                .setPositiveButton(getString(R.string.update_download),
+                        new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                downloadUpdate(info);
+                            }
+                        })
+                .setNeutralButton(getString(R.string.about_open_repo),
+                        new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                openUrl(info.releaseUrl);
+                            }
+                        })
+                .setNegativeButton(getString(R.string.update_later), null)
+                .show();
+    }
+
+    private void downloadUpdate(final UpdateManager.UpdateInfo info) {
+        final LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(20);
+        box.setPadding(pad, dp(8), pad, dp(4));
+
+        mUpdateMessage = new TextView(this);
+        mUpdateMessage.setText(getString(R.string.update_downloading));
+        mUpdateMessage.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        mUpdateMessage.setTextColor(Ui.TEXT);
+        box.addView(mUpdateMessage);
+
+        mUpdateBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        mUpdateBar.setMax(100);
+        mUpdateBar.setIndeterminate(true);
+        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        barLp.topMargin = dp(12);
+        box.addView(mUpdateBar, barLp);
+
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.update_found_title))
+                .setView(box)
+                .setCancelable(false)
+                .create();
+        dialog.show();
+
+        UpdateManager.download(this, info, new UpdateManager.DownloadCallback() {
+            @Override
+            public void onProgress(int percent) {
+                if (percent < 0) {
+                    mUpdateBar.setIndeterminate(true);
+                    mUpdateMessage.setText(getString(R.string.update_downloading));
+                } else {
+                    mUpdateBar.setIndeterminate(false);
+                    mUpdateBar.setProgress(percent);
+                    mUpdateMessage.setText(getString(R.string.update_download_progress, percent));
+                }
+            }
+
+            @Override
+            public void onDone(File apk) {
+                dismissSafe(dialog);
+                mPendingInstallApk = apk;
+                maybeInstallPending();
+            }
+
+            @Override
+            public void onError(String message) {
+                dismissSafe(dialog);
+                Toast.makeText(MainActivity.this, getString(R.string.update_download_failed, message),
+                        Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    /** 有下载好的安装包时，尝试安装；缺少「未知来源」授权就先引导用户开启。 */
+    private void maybeInstallPending() {
+        if (mPendingInstallApk == null) {
+            return;
+        }
+        if (UpdateManager.canInstall(this)) {
+            boolean ok = UpdateManager.install(this, mPendingInstallApk);
+            if (ok) {
+                mPendingInstallApk = null;
+            } else {
+                Toast.makeText(this, R.string.update_install_failed, Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.update_found_title))
+                .setMessage(getString(R.string.update_need_permission))
+                .setPositiveButton(getString(R.string.update_open_settings),
+                        new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                openUnknownSourcesSettings();
+                            }
+                        })
+                .setNegativeButton(getString(R.string.update_later), null)
+                .show();
+    }
+
+    private void openUnknownSourcesSettings() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return;
+        }
+        Uri packageUri = Uri.parse("package:" + getPackageName());
+        try {
+            startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, packageUri));
+        } catch (ActivityNotFoundException e) {
+            try {
+                startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri));
+            } catch (ActivityNotFoundException ignored) {
+                // 没有对应设置页，忽略
+            }
+        }
+    }
+
+    private void dismissSafe(AlertDialog dialog) {
+        if (dialog != null && dialog.isShowing()) {
+            dialog.dismiss();
+        }
     }
 
     // ------------------------------------------------------------------

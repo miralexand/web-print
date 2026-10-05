@@ -6,11 +6,15 @@ import android.content.ClipData;
 import android.content.ContentResolver;
 import android.content.Intent;
 import android.database.Cursor;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.pdf.PdfRenderer;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.ParcelFileDescriptor;
 import android.provider.OpenableColumns;
 import android.text.InputFilter;
 import android.text.InputType;
@@ -24,6 +28,8 @@ import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -37,6 +43,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -76,6 +83,10 @@ public class ShareActivity extends Activity {
     private static final int MAX_TEXT_BYTES = 100 * 1024;
     /** 结果文本框里只保留这么多字符，避免超长错误信息撑爆界面。 */
     private static final int MAX_RESULT_CHARS = 400;
+    /** PDF 预览最多渲染的页数（控制内存占用）。 */
+    private static final int MAX_PREVIEW_PAGES = 20;
+    /** PDF 缩略图位图宽度（像素）。 */
+    private static final int PREVIEW_THUMB_WIDTH = 240;
 
     /** 客户端本地认定的可打印类型（扩展名 → MIME、分类），与 fileValidator.js 保持一致。 */
     private static final String[] EXTENSIONS = {
@@ -107,6 +118,27 @@ public class ShareActivity extends Activity {
     private ProgressBar mProgress;
     private TextView mResultView;
 
+    // 预览与页码
+    private LinearLayout mPreviewCard;
+    private TextView mPreviewInfo;
+    private HorizontalScrollView mThumbScroll;
+    private LinearLayout mThumbStrip;
+    private LinearLayout mPagesPanel;
+    private EditText mPageFromInput;
+    private EditText mPageToInput;
+    private TextView mPageSelectedView;
+    private final List<View> mThumbCells = new ArrayList<>();
+    /** PDF 页数；0 表示未知（非 PDF 或尚未解析）。 */
+    private int mPageCount;
+    /** 是否显示页码输入（单个文件且可能多页时）。 */
+    private boolean mPagesEnabled;
+    /** 缩略图选择锚点：-1 表示等下一次点按作为起始页。 */
+    private int mAnchor = -1;
+    /** 预览渲染线程与“失效令牌”，重新选择文件后旧任务的结果会被丢弃。 */
+    private ExecutorService mPreviewExecutor;
+    private long mPreviewToken;
+    private File mPreviewPdf;
+
     /** 本次待打印的条目（文本分享只有 1 条）。 */
     private final List<Item> mItems = new ArrayList<>();
     /** true 表示走 {@code /api/print/text}（JSON 文本打印）。 */
@@ -130,6 +162,7 @@ public class ShareActivity extends Activity {
         setTitle(getString(R.string.share_title));
         mStore = new ServerStore(this);
         mExecutor = Executors.newSingleThreadExecutor();
+        mPreviewExecutor = Executors.newSingleThreadExecutor();
 
         setContentView(buildContentView());
 
@@ -156,6 +189,11 @@ public class ShareActivity extends Activity {
             mExecutor.shutdownNow();
             mExecutor = null;
         }
+        if (mPreviewExecutor != null) {
+            mPreviewToken++;
+            mPreviewExecutor.shutdownNow();
+            mPreviewExecutor = null;
+        }
         super.onDestroy();
     }
 
@@ -166,63 +204,95 @@ public class ShareActivity extends Activity {
     private View buildContentView() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(0xFFFFFFFF);
+        root.setBackgroundColor(Ui.BG);
 
-        int pad = dp(16);
-        int side = dp(20);
+        int side = dp(16);
 
-        // ---- 标题 ----
+        // ---- 标题栏 ----
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.VERTICAL);
+        header.setBackgroundColor(Ui.CARD);
+        header.setPadding(side, dp(16), side, dp(14));
+
         TextView title = new TextView(this);
         title.setText(getString(R.string.share_title));
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-        title.setTextColor(0xFF212121);
+        title.setTextColor(Ui.TEXT);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setPadding(side, pad, side, dp(6));
-        root.addView(title, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        header.addView(title);
+
+        TextView subtitle = new TextView(this);
+        subtitle.setText(getString(R.string.share_summary_title));
+        subtitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        subtitle.setTextColor(Ui.TEXT_FAINT);
+        subtitle.setPadding(0, dp(2), 0, 0);
+        header.addView(subtitle);
+        root.addView(header, matchWidth());
 
         // ---- 可滚动内容区 ----
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(side, 0, side, pad);
+        content.setPadding(side, dp(12), side, dp(12));
 
-        content.addView(label(getString(R.string.share_summary_title)));
-
+        // 即将打印
+        LinearLayout summaryCard = Ui.card(this);
+        summaryCard.addView(Ui.sectionTitle(this, getString(R.string.share_summary_title)));
         mSummaryView = new TextView(this);
         mSummaryView.setId(R.id.share_summary_text);
         mSummaryView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        mSummaryView.setTextColor(0xFF212121);
+        mSummaryView.setTextColor(Ui.TEXT);
         mSummaryView.setLineSpacing(dp(3), 1f);
         mSummaryView.setTextIsSelectable(true);
-        content.addView(mSummaryView, matchWidth());
+        LinearLayout.LayoutParams summaryLp = matchWidth();
+        summaryLp.topMargin = dp(6);
+        summaryCard.addView(mSummaryView, summaryLp);
 
         mInfoView = new TextView(this);
         mInfoView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        mInfoView.setTextColor(0xFFD32F2F);
+        mInfoView.setTextColor(Ui.DANGER);
         mInfoView.setLineSpacing(dp(2), 1f);
         mInfoView.setVisibility(View.GONE);
         LinearLayout.LayoutParams infoLp = matchWidth();
         infoLp.topMargin = dp(8);
-        content.addView(mInfoView, infoLp);
+        summaryCard.addView(mInfoView, infoLp);
+        content.addView(summaryCard, Ui.cardParams(this));
 
-        // 「还没有服务器」时只显示这一段，不显示服务器选择与份数
-        mNoServerPanel = new LinearLayout(this);
-        mNoServerPanel.setOrientation(LinearLayout.VERTICAL);
+        // 预览（PDF / 图片，单个文件时才显示）
+        mPreviewCard = Ui.card(this);
+        mPreviewCard.setVisibility(View.GONE);
+        mPreviewCard.addView(Ui.sectionTitle(this, getString(R.string.share_preview_title)));
+
+        mPreviewInfo = new TextView(this);
+        mPreviewInfo.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        mPreviewInfo.setTextColor(Ui.TEXT_MUTED);
+        mPreviewInfo.setLineSpacing(dp(2), 1f);
+        mPreviewInfo.setPadding(0, dp(6), 0, 0);
+        mPreviewCard.addView(mPreviewInfo, matchWidth());
+
+        mThumbScroll = new HorizontalScrollView(this);
+        mThumbScroll.setId(R.id.share_preview_scroll);
+        mThumbScroll.setHorizontalScrollBarEnabled(false);
+        mThumbStrip = new LinearLayout(this);
+        mThumbStrip.setOrientation(LinearLayout.HORIZONTAL);
+        mThumbScroll.addView(mThumbStrip, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams thumbLp = matchWidth();
+        thumbLp.topMargin = dp(10);
+        mThumbScroll.setVisibility(View.GONE);
+        mPreviewCard.addView(mThumbScroll, thumbLp);
+        content.addView(mPreviewCard, Ui.cardParams(this));
+
+        // 无服务器提示
+        mNoServerPanel = Ui.card(this);
         mNoServerPanel.setVisibility(View.GONE);
-
         TextView noServer = new TextView(this);
         noServer.setText(getString(R.string.share_no_server));
         noServer.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        noServer.setTextColor(0xFF616161);
+        noServer.setTextColor(Ui.TEXT_MUTED);
         noServer.setLineSpacing(dp(3), 1f);
-        LinearLayout.LayoutParams noServerLp = matchWidth();
-        noServerLp.topMargin = dp(20);
-        mNoServerPanel.addView(noServer, noServerLp);
-
-        Button openServers = new Button(this);
+        mNoServerPanel.addView(noServer, matchWidth());
+        Button openServers = Ui.ghostButton(this, getString(R.string.share_open_servers));
         openServers.setId(R.id.share_open_servers_button);
-        openServers.setText(getString(R.string.share_open_servers));
-        openServers.setAllCaps(false);
         openServers.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -231,20 +301,18 @@ public class ShareActivity extends Activity {
         });
         LinearLayout.LayoutParams openLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        openLp.topMargin = dp(16);
+        openLp.topMargin = dp(12);
         mNoServerPanel.addView(openServers, openLp);
-        content.addView(mNoServerPanel, matchWidth());
+        content.addView(mNoServerPanel, Ui.cardParams(this));
 
-        // 正常状态：服务器选择 + 份数
-        mFormPanel = new LinearLayout(this);
-        mFormPanel.setOrientation(LinearLayout.VERTICAL);
-
-        mFormPanel.addView(label(getString(R.string.share_server_label)));
+        // 打印选项：服务器 + 页码 + 份数
+        mFormPanel = Ui.card(this);
+        mFormPanel.addView(Ui.sectionTitle(this, getString(R.string.share_server_label)));
 
         // 只有一个服务器时不显示下拉框，直接显示地址（下拉框保持 GONE 占位）
         mServerUrlView = new TextView(this);
         mServerUrlView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        mServerUrlView.setTextColor(0xFF1A73E8);
+        mServerUrlView.setTextColor(Ui.PRIMARY);
         mServerUrlView.setPadding(0, dp(4), 0, dp(4));
         mFormPanel.addView(mServerUrlView, matchWidth());
 
@@ -265,10 +333,60 @@ public class ShareActivity extends Activity {
                 // 不需要处理
             }
         });
-        mFormPanel.addView(mServerSpinner, matchWidth());
+        LinearLayout.LayoutParams spinnerLp = matchWidth();
+        spinnerLp.topMargin = dp(4);
+        mFormPanel.addView(mServerSpinner, spinnerLp);
 
-        mFormPanel.addView(label(getString(R.string.share_copies_label)));
+        // 页码
+        mPagesPanel = new LinearLayout(this);
+        mPagesPanel.setOrientation(LinearLayout.VERTICAL);
+        mPagesPanel.setVisibility(View.GONE);
+        mPagesPanel.addView(Ui.fieldLabel(this, getString(R.string.share_pages_label)));
 
+        LinearLayout rangeRow = new LinearLayout(this);
+        rangeRow.setOrientation(LinearLayout.HORIZONTAL);
+        rangeRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        mPageFromInput = numberInput(R.id.share_page_from_input,
+                getString(R.string.share_page_from_hint));
+        rangeRow.addView(mPageFromInput, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView sep = new TextView(this);
+        sep.setText(getString(R.string.share_page_to_sep));
+        sep.setTextColor(Ui.TEXT_MUTED);
+        sep.setPadding(dp(8), 0, dp(8), 0);
+        rangeRow.addView(sep);
+
+        mPageToInput = numberInput(R.id.share_page_to_input,
+                getString(R.string.share_page_to_hint));
+        rangeRow.addView(mPageToInput, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        Button allPages = Ui.ghostButton(this, getString(R.string.share_pages_all));
+        allPages.setId(R.id.share_pages_all_button);
+        allPages.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                clearPageRange();
+            }
+        });
+        LinearLayout.LayoutParams allLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        allLp.leftMargin = dp(8);
+        rangeRow.addView(allPages, allLp);
+
+        mPagesPanel.addView(rangeRow, matchWidth());
+
+        mPageSelectedView = new TextView(this);
+        mPageSelectedView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        mPageSelectedView.setTextColor(Ui.PRIMARY);
+        mPageSelectedView.setPadding(0, dp(6), 0, 0);
+        mPagesPanel.addView(mPageSelectedView, matchWidth());
+        mFormPanel.addView(mPagesPanel, matchWidth());
+
+        // 份数
+        mFormPanel.addView(Ui.fieldLabel(this, getString(R.string.share_copies_label)));
         mCopiesInput = new EditText(this);
         mCopiesInput.setId(R.id.share_copies_input);
         mCopiesInput.setInputType(InputType.TYPE_CLASS_NUMBER);
@@ -279,24 +397,25 @@ public class ShareActivity extends Activity {
         mCopiesInput.setSelection(mCopiesInput.getText().length());
         mFormPanel.addView(mCopiesInput, matchWidth());
 
-        content.addView(mFormPanel, matchWidth());
+        content.addView(mFormPanel, Ui.cardParams(this));
 
         // ---- 结果区 ----
         mProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleSmall);
         mProgress.setVisibility(View.GONE);
         LinearLayout.LayoutParams progressLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        progressLp.topMargin = dp(16);
+        progressLp.topMargin = dp(4);
+        progressLp.leftMargin = dp(4);
         content.addView(mProgress, progressLp);
 
         mResultView = new TextView(this);
         mResultView.setId(R.id.share_result_text);
         mResultView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        mResultView.setTextColor(0xFF616161);
+        mResultView.setTextColor(Ui.TEXT_MUTED);
         mResultView.setLineSpacing(dp(3), 1f);
         mResultView.setTextIsSelectable(true);
         LinearLayout.LayoutParams resultLp = matchWidth();
-        resultLp.topMargin = dp(12);
+        resultLp.topMargin = dp(8);
         content.addView(mResultView, resultLp);
 
         ScrollView scroll = new ScrollView(this);
@@ -309,12 +428,11 @@ public class ShareActivity extends Activity {
         LinearLayout buttons = new LinearLayout(this);
         buttons.setOrientation(LinearLayout.HORIZONTAL);
         buttons.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-        buttons.setPadding(side, pad, side, pad);
+        buttons.setBackgroundColor(Ui.CARD);
+        buttons.setPadding(side, dp(10), side, dp(10));
 
-        mCancelButton = new Button(this);
+        mCancelButton = Ui.ghostButton(this, getString(R.string.share_cancel));
         mCancelButton.setId(R.id.share_cancel_button);
-        mCancelButton.setText(getString(R.string.share_cancel));
-        mCancelButton.setAllCaps(false);
         mCancelButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -323,10 +441,8 @@ public class ShareActivity extends Activity {
         });
         buttons.addView(mCancelButton);
 
-        mPrintButton = new Button(this);
+        mPrintButton = Ui.primaryButton(this, getString(R.string.share_print));
         mPrintButton.setId(R.id.share_print_button);
-        mPrintButton.setText(getString(R.string.share_print));
-        mPrintButton.setAllCaps(false);
         mPrintButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -343,18 +459,371 @@ public class ShareActivity extends Activity {
         return root;
     }
 
-    private TextView label(String text) {
-        TextView tv = new TextView(this);
-        tv.setText(text);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        tv.setTextColor(0xFF616161);
-        tv.setPadding(0, dp(18), 0, 0);
-        return tv;
+    private EditText numberInput(int id, String hint) {
+        EditText input = new EditText(this);
+        input.setId(id);
+        input.setHint(hint);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER);
+        input.setFilters(new InputFilter[] {new InputFilter.LengthFilter(4)});
+        input.setSingleLine(true);
+        input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        return input;
     }
 
     private LinearLayout.LayoutParams matchWidth() {
         return new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+    }
+
+    // ------------------------------------------------------------------
+    // 预览与页码
+    // ------------------------------------------------------------------
+
+    /** 根据当前条目准备预览：单个文件时显示；PDF 渲染缩略图，图片直接显示。 */
+    private void preparePreview() {
+        resetPreviewState();
+        if (mTextMode || mItems.size() != 1) {
+            mPreviewCard.setVisibility(View.GONE);
+            return;
+        }
+        Item item = mItems.get(0);
+        String ext = item.extension != null ? item.extension
+                : resolveExtension(item.name, item.mime);
+        if (".pdf".equals(ext)) {
+            mPreviewCard.setVisibility(View.VISIBLE);
+            mPagesEnabled = true;
+            mPagesPanel.setVisibility(View.VISIBLE);
+            renderPdfPreview(item);
+        } else if (isImageExtension(ext)) {
+            mPreviewCard.setVisibility(View.VISIBLE);
+            mPagesEnabled = false;
+            mPagesPanel.setVisibility(View.GONE);
+            renderImagePreview(item);
+        } else {
+            // Office / 文本：无法直接预览，但页码仍可手填（服务端转换后生效）
+            mPreviewCard.setVisibility(View.VISIBLE);
+            mPreviewInfo.setText(getString(R.string.share_preview_unavailable));
+            mThumbScroll.setVisibility(View.GONE);
+            mPagesEnabled = true;
+            mPagesPanel.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void resetPreviewState() {
+        mPreviewToken++;
+        mPageCount = 0;
+        mPagesEnabled = false;
+        mAnchor = -1;
+        mThumbCells.clear();
+        if (mThumbStrip != null) {
+            mThumbStrip.removeAllViews();
+        }
+        if (mThumbScroll != null) {
+            mThumbScroll.setVisibility(View.GONE);
+        }
+        if (mPreviewInfo != null) {
+            mPreviewInfo.setText("");
+        }
+        if (mPageFromInput != null) {
+            mPageFromInput.setText("");
+        }
+        if (mPageToInput != null) {
+            mPageToInput.setText("");
+        }
+        if (mPageSelectedView != null) {
+            mPageSelectedView.setText("");
+        }
+        if (mPagesPanel != null) {
+            mPagesPanel.setVisibility(View.GONE);
+        }
+    }
+
+    private void renderPdfPreview(final Item item) {
+        final long token = mPreviewToken;
+        mPreviewInfo.setText(getString(R.string.share_preview_loading));
+        mThumbScroll.setVisibility(View.GONE);
+        if (mPreviewExecutor == null) {
+            return;
+        }
+        mPreviewExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                ParcelFileDescriptor pfd = null;
+                PdfRenderer renderer = null;
+                final List<Bitmap> bitmaps = new ArrayList<>();
+                int pageCount = 0;
+                try {
+                    File file = new File(getCacheDir(), "preview.pdf");
+                    FileOutputStream fos = new FileOutputStream(file);
+                    try {
+                        fos.write(item.bytes);
+                        fos.flush();
+                    } finally {
+                        fos.close();
+                    }
+                    mPreviewPdf = file;
+                    pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
+                    renderer = new PdfRenderer(pfd);
+                    pageCount = renderer.getPageCount();
+                    int limit = Math.min(pageCount, MAX_PREVIEW_PAGES);
+                    for (int i = 0; i < limit; i++) {
+                        PdfRenderer.Page page = renderer.openPage(i);
+                        int width = PREVIEW_THUMB_WIDTH;
+                        int height = Math.max(1,
+                                (int) ((float) page.getHeight() / page.getWidth() * width));
+                        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                        bitmap.eraseColor(Color.WHITE);
+                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+                        page.close();
+                        bitmaps.add(bitmap);
+                    }
+                } catch (Throwable e) {
+                    bitmaps.clear();
+                } finally {
+                    if (renderer != null) {
+                        try {
+                            renderer.close();
+                        } catch (Exception ignored) {
+                            // 忽略
+                        }
+                    }
+                    if (pfd != null) {
+                        try {
+                            pfd.close();
+                        } catch (Exception ignored) {
+                            // 忽略
+                        }
+                    }
+                }
+                final int count = pageCount;
+                final List<Bitmap> result = bitmaps;
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (token != mPreviewToken) {
+                            return;
+                        }
+                        mPageCount = count;
+                        if (count <= 0 || result.isEmpty()) {
+                            mPreviewInfo.setText(getString(R.string.share_preview_unavailable));
+                            return;
+                        }
+                        mThumbStrip.removeAllViews();
+                        mThumbCells.clear();
+                        for (int i = 0; i < result.size(); i++) {
+                            addThumb(result.get(i), i);
+                        }
+                        mThumbScroll.setVisibility(View.VISIBLE);
+                        String text = getString(R.string.share_preview_pages, count);
+                        if (count > result.size()) {
+                            text = text + "\n" + getString(R.string.share_preview_more, result.size());
+                        } else {
+                            text = text + "\n" + getString(R.string.share_preview_select_hint);
+                        }
+                        mPreviewInfo.setText(text);
+                    }
+                });
+            }
+        });
+    }
+
+    private void renderImagePreview(final Item item) {
+        final long token = mPreviewToken;
+        mPreviewInfo.setText(getString(R.string.share_preview_loading));
+        mThumbScroll.setVisibility(View.GONE);
+        final int target = dp(180);
+        if (mPreviewExecutor == null) {
+            return;
+        }
+        mPreviewExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+                Bitmap bitmap = null;
+                try {
+                    BitmapFactory.Options bounds = new BitmapFactory.Options();
+                    bounds.inJustDecodeBounds = true;
+                    BitmapFactory.decodeByteArray(item.bytes, 0, item.bytes.length, bounds);
+                    int sample = 1;
+                    while (bounds.outWidth / (sample * 2) >= target
+                            && bounds.outHeight / (sample * 2) >= target) {
+                        sample *= 2;
+                    }
+                    BitmapFactory.Options decode = new BitmapFactory.Options();
+                    decode.inSampleSize = sample;
+                    bitmap = BitmapFactory.decodeByteArray(item.bytes, 0, item.bytes.length, decode);
+                } catch (Throwable ignored) {
+                    // 无法解码时退化为通用提示
+                }
+                final Bitmap result = bitmap;
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (token != mPreviewToken) {
+                            return;
+                        }
+                        mPageCount = 1;
+                        if (result == null) {
+                            mPreviewInfo.setText(getString(R.string.share_preview_unavailable));
+                            mThumbScroll.setVisibility(View.GONE);
+                            return;
+                        }
+                        mPreviewInfo.setText(getString(R.string.share_preview_pages, 1));
+                        mThumbStrip.removeAllViews();
+                        mThumbCells.clear();
+                        ImageView view = new ImageView(ShareActivity.this);
+                        view.setImageBitmap(result);
+                        view.setAdjustViewBounds(true);
+                        view.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                        mThumbStrip.addView(view, new LinearLayout.LayoutParams(
+                                dp(180), ViewGroup.LayoutParams.WRAP_CONTENT));
+                        mThumbScroll.setVisibility(View.VISIBLE);
+                    }
+                });
+            }
+        });
+    }
+
+    private void addThumb(Bitmap bitmap, final int index) {
+        LinearLayout cell = new LinearLayout(this);
+        cell.setOrientation(LinearLayout.VERTICAL);
+        cell.setGravity(Gravity.CENTER_HORIZONTAL);
+        cell.setPadding(dp(4), dp(4), dp(4), dp(4));
+        cell.setBackground(Ui.outline(this, Ui.CARD, Ui.DIVIDER, 8));
+
+        ImageView image = new ImageView(this);
+        image.setImageBitmap(bitmap);
+        image.setAdjustViewBounds(true);
+        image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        cell.addView(image, new LinearLayout.LayoutParams(
+                dp(96), ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView number = new TextView(this);
+        number.setText(String.valueOf(index + 1));
+        number.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        number.setTextColor(Ui.TEXT_MUTED);
+        number.setPadding(0, dp(4), 0, 0);
+        cell.addView(number);
+
+        final int page = index + 1;
+        cell.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                onThumbClicked(page);
+            }
+        });
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.rightMargin = dp(8);
+        mThumbStrip.addView(cell, lp);
+        mThumbCells.add(cell);
+    }
+
+    /** 点按缩略图：第一次选起始页，第二次选结束页。 */
+    private void onThumbClicked(int page) {
+        if (mAnchor < 0) {
+            mAnchor = page;
+            setPageRange(page, page);
+        } else {
+            setPageRange(Math.min(mAnchor, page), Math.max(mAnchor, page));
+            mAnchor = -1;
+        }
+    }
+
+    private void setPageRange(int from, int to) {
+        mPageFromInput.setText(String.valueOf(from));
+        mPageToInput.setText(String.valueOf(to));
+        updatePageSelection();
+    }
+
+    private void clearPageRange() {
+        mAnchor = -1;
+        mPageFromInput.setText("");
+        mPageToInput.setText("");
+        mPageSelectedView.setText("");
+        updateThumbHighlight(-1, -1);
+    }
+
+    private void updatePageSelection() {
+        String fromRaw = mPageFromInput.getText().toString().trim();
+        String toRaw = mPageToInput.getText().toString().trim();
+        int from = fromRaw.isEmpty() ? -1 : parseSafeInt(fromRaw);
+        int to = toRaw.isEmpty() ? -1 : parseSafeInt(toRaw);
+        if (from < 0 && to < 0) {
+            mPageSelectedView.setText("");
+            updateThumbHighlight(-1, -1);
+            return;
+        }
+        if (from < 0) {
+            from = 1;
+        }
+        if (to < 0) {
+            to = from;
+        }
+        int lo = Math.min(from, to);
+        int hi = Math.max(from, to);
+        String label = lo == hi ? String.valueOf(lo) : lo + "-" + hi;
+        mPageSelectedView.setText(getString(R.string.share_pages_selected, label));
+        updateThumbHighlight(lo, hi);
+    }
+
+    private void updateThumbHighlight(int from, int to) {
+        for (int i = 0; i < mThumbCells.size(); i++) {
+            int page = i + 1;
+            boolean selected = from > 0 && page >= from && page <= to;
+            mThumbCells.get(i).setBackground(selected
+                    ? Ui.outline(this, Ui.PRIMARY_SOFT, Ui.PRIMARY, 8)
+                    : Ui.outline(this, Ui.CARD, Ui.DIVIDER, 8));
+        }
+    }
+
+    /**
+     * 读取页码输入并生成服务端 {@code pages} 字段。
+     *
+     * @return 空串表示全部页；{@code null} 表示输入非法（已给出提示）
+     */
+    private String parsePageRange(boolean showError) {
+        String fromRaw = mPageFromInput.getText().toString().trim();
+        String toRaw = mPageToInput.getText().toString().trim();
+        if (fromRaw.isEmpty() && toRaw.isEmpty()) {
+            return "";
+        }
+        int from = fromRaw.isEmpty() ? 0 : parseSafeInt(fromRaw);
+        int to = toRaw.isEmpty() ? 0 : parseSafeInt(toRaw);
+        boolean badFormat = (!fromRaw.isEmpty() && from < 1) || (!toRaw.isEmpty() && to < 1);
+        if (badFormat) {
+            if (showError) {
+                Toast.makeText(this, getString(R.string.share_err_pages_format, Math.max(mPageCount, 1)),
+                        Toast.LENGTH_LONG).show();
+            }
+            return null;
+        }
+        if (mPageCount > 0 && (from > mPageCount || to > mPageCount)) {
+            if (showError) {
+                Toast.makeText(this, getString(R.string.share_err_pages_range, mPageCount),
+                        Toast.LENGTH_LONG).show();
+            }
+            return null;
+        }
+        if (from > 0 && to > 0) {
+            return Math.min(from, to) + "-" + Math.max(from, to);
+        }
+        if (from > 0) {
+            return String.valueOf(from);
+        }
+        return "1-" + to;
+    }
+
+    private static int parseSafeInt(String value) {
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    private static boolean isImageExtension(String extension) {
+        return ".png".equals(extension) || ".jpg".equals(extension) || ".jpeg".equals(extension);
     }
 
     // ------------------------------------------------------------------
@@ -435,6 +904,7 @@ public class ShareActivity extends Activity {
 
         bindServerPicker();
         renderSummary();
+        preparePreview();
 
         if (mItems.isEmpty() && !mTextMode) {
             mPrintButton.setEnabled(false);
@@ -761,6 +1231,15 @@ public class ShareActivity extends Activity {
             }
         }
 
+        // 页码范围：仅单个文件时生效（批量文件各页数不同，统一按全部页处理）
+        String pages = "";
+        if (!mTextMode && mItems.size() == 1 && mPagesEnabled) {
+            pages = parsePageRange(true);
+            if (pages == null) {
+                return; // parsePageRange 已经给出提示
+            }
+        }
+
         String base = ServerStore.normalizeUrl(selectedServerUrl());
         if (base == null) {
             // ServerStore 只保存 https 地址，这里只是兜底（不放开 HTTPS-only 策略）
@@ -768,15 +1247,17 @@ public class ShareActivity extends Activity {
             return;
         }
 
-        beginUpload(base, copies, queue, problems);
+        beginUpload(base, copies, pages, queue, problems);
     }
 
-    private void beginUpload(final String baseUrl, final int copies,
+    private void beginUpload(final String baseUrl, final int copies, final String pages,
             final List<Item> queue, final List<String> problems) {
         mUploading = true;
         mPrintButton.setEnabled(false);
         mCopiesInput.setEnabled(false);
         mServerSpinner.setEnabled(false);
+        mPageFromInput.setEnabled(false);
+        mPageToInput.setEnabled(false);
         mProgress.setVisibility(View.VISIBLE);
         mResultView.setTextColor(0xFF616161);
         mResultView.setText(mTextMode
@@ -810,7 +1291,7 @@ public class ShareActivity extends Activity {
                                             + "\n" + name);
                                 }
                             });
-                            result.add(submitFile(baseUrl, cookie, copies, item));
+                            result.add(submitFile(baseUrl, cookie, copies, pages, item));
                         }
                     }
                 } catch (Throwable t) {
@@ -840,6 +1321,8 @@ public class ShareActivity extends Activity {
         mPrintButton.setEnabled(true);
         mCopiesInput.setEnabled(true);
         mServerSpinner.setEnabled(true);
+        mPageFromInput.setEnabled(true);
+        mPageToInput.setEnabled(true);
 
         int failures = result.failures();
         String quota = quotaSuffix(result.lastQuota);
@@ -951,10 +1434,10 @@ public class ShareActivity extends Activity {
     // 网络（工作线程）
     // ------------------------------------------------------------------
 
-    private Result submitFile(String baseUrl, String cookie, int copies, Item item) {
+    private Result submitFile(String baseUrl, String cookie, int copies, String pages, Item item) {
         HttpURLConnection conn = null;
         try {
-            MultipartBody body = buildMultipart(item, copies);
+            MultipartBody body = buildMultipart(item, copies, pages);
             URL url = new URL(baseUrl + "/api/print");
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
@@ -1135,17 +1618,18 @@ public class ShareActivity extends Activity {
      * <p>先算出总长度再一次性写出，目的是能给出准确的 {@code Content-Length}
      * （服务端 multer 也能据此拒绝超大请求）。
      */
-    private MultipartBody buildMultipart(Item item, int copies) {
+    private MultipartBody buildMultipart(Item item, int copies, String pages) {
         String boundary = "----WebPrintAndroid"
                 + Long.toHexString(System.currentTimeMillis())
                 + Long.toHexString(Double.doubleToLongBits(Math.random()));
         Charset utf8 = Charset.forName("UTF-8");
+        String pageValue = pages == null ? "" : pages;
 
         ByteArrayOutputStream head = new ByteArrayOutputStream();
         try {
             for (String[] field : new String[][] {
                     {"copies", String.valueOf(copies)},
-                    {"pages", ""},
+                    {"pages", pageValue},
                     {"color", "mono"},
                     {"paperSize", "A4"},
                     {"printer", ""}}) {

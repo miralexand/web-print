@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- 允许应用内下载并安装新版本 APK（Android 8.0+ 仍需用户授予“安装未知应用”） -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- 扫码是可选能力：没有摄像头的设备（如平板/电视盒）仍可手动填写地址 -->
     <uses-feature
@@ -23,7 +25,8 @@
 
         <!--
           网页中的 <input type="file">（打印文件入口）由 WebChromeClient.onShowFileChooser
-          处理；其中「拍照」入口需要把 content:// URI 交给相机应用写入，
+          处理；其中「拍照」入口需要把 content:// URI 交给相机应用写入。
+          「检查更新」下载的 APK 也需要通过 content:// URI 交给系统安装器。
           这里用项目自带的极简 Provider（不使用 AndroidX 的 FileProvider，因为本工程禁用了 AndroidX）。
         -->
         <provider

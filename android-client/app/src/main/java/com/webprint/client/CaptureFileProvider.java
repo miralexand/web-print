@@ -3,23 +3,31 @@ package com.webprint.client;
 import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.database.Cursor;
+import android.database.MatrixCursor;
 import android.net.Uri;
 import android.os.ParcelFileDescriptor;
+import android.provider.OpenableColumns;
 
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 
 /**
- * 极简 {@link ContentProvider}，只用于把 {@code content://com.webprint.client.fileprovider/captures/<文件名>}
- * 映射到应用私有目录 {@code files/captures/} 下的文件。
+ * 极简 {@link ContentProvider}，把应用私有目录下的文件暴露成 content:// URI：
+ *
+ * <ul>
+ *   <li>{@code content://com.webprint.client.fileprovider/captures/<文件名>}
+ *       → {@code files/captures/}：供网页「拍照上传」写入相机照片；</li>
+ *   <li>{@code content://com.webprint.client.fileprovider/updates/<文件名>}
+ *       → {@code files/updates/}：供「检查更新」把下载好的 APK 交给系统安装器。</li>
+ * </ul>
  *
  * <p>为什么不用 AndroidX 的 {@code FileProvider}：本工程显式设置
  * {@code android.useAndroidX=false} 且不引入任何 support/AndroidX 依赖，
- * 而网页的「拍照上传」需要给相机应用一个可写的 content:// URI，故自带约百行实现。
+ * 而相机写入、APK 安装都需要 content:// URI，故自带实现。
  *
- * <p>安全边界：只能访问 {@code files/captures/} 目录内的普通文件，
- * 路径经过 canonical 前缀校验，{@code ..} 等穿越写法会被拒绝。
+ * <p>安全边界：只能访问上述两个目录内的普通文件，路径经过 canonical 前缀校验，
+ * {@code ..} 等穿越写法会被拒绝。
  */
 public class CaptureFileProvider extends ContentProvider {
 
@@ -28,19 +36,33 @@ public class CaptureFileProvider extends ContentProvider {
 
     /** URI 的第一段路径，对应 {@code files/captures} 目录。 */
     private static final String PATH_CAPTURES = "captures";
+    /** URI 的第一段路径，对应 {@code files/updates} 目录。 */
+    private static final String PATH_UPDATES = "updates";
+
+    /** 安装包 MIME。 */
+    private static final String MIME_APK = "application/vnd.android.package-archive";
 
     /** 构造写入相机照片用的 URI。 */
     public static Uri buildCaptureUri(String fileName) {
+        return buildUri(PATH_CAPTURES, fileName);
+    }
+
+    /** 构造把更新 APK 交给系统安装器用的 URI。 */
+    public static Uri buildUpdateUri(String fileName) {
+        return buildUri(PATH_UPDATES, fileName);
+    }
+
+    private static Uri buildUri(String root, String fileName) {
         return new Uri.Builder()
                 .scheme("content")
                 .authority(AUTHORITY)
-                .appendPath(PATH_CAPTURES)
+                .appendPath(root)
                 .appendPath(fileName)
                 .build();
     }
 
-    private File capturesDir() {
-        return new File(getContext().getFilesDir(), PATH_CAPTURES);
+    private File rootDir(String root) {
+        return new File(getContext().getFilesDir(), root);
     }
 
     @Override
@@ -50,6 +72,10 @@ public class CaptureFileProvider extends ContentProvider {
 
     @Override
     public String getType(Uri uri) {
+        if (uri != null && uri.getPathSegments().size() >= 1
+                && PATH_UPDATES.equals(uri.getPathSegments().get(0))) {
+            return MIME_APK;
+        }
         return "image/jpeg";
     }
 
@@ -75,10 +101,11 @@ public class CaptureFileProvider extends ContentProvider {
 
     /** 把 URI 解析为目录内的文件；越界或非法则返回 {@code null}。 */
     private File resolve(Uri uri) {
-        if (uri.getPathSegments().size() != 2) {
+        if (uri == null || uri.getPathSegments().size() != 2) {
             return null;
         }
-        if (!PATH_CAPTURES.equals(uri.getPathSegments().get(0))) {
+        String root = uri.getPathSegments().get(0);
+        if (!PATH_CAPTURES.equals(root) && !PATH_UPDATES.equals(root)) {
             return null;
         }
         String name = uri.getPathSegments().get(1);
@@ -86,7 +113,7 @@ public class CaptureFileProvider extends ContentProvider {
                 || "..".equals(name) || ".".equals(name)) {
             return null;
         }
-        File dir = capturesDir();
+        File dir = rootDir(root);
         File file = new File(dir, name);
         try {
             String dirPath = dir.getCanonicalPath();
@@ -116,12 +143,30 @@ public class CaptureFileProvider extends ContentProvider {
     }
 
     /**
-     * 相机应用有时会查询文件大小等信息；这里返回 null 表示“不支持查询”，
-     * 相机应用会退化为直接写文件。
+     * 返回文件的显示名与大小。系统安装器（PackageInstaller）会查询这些列，
+     * 相机应用也会用它读取文件名；查不到（URI 非法）时返回 {@code null}，
+     * 由调用方退化为直接操作流。
      */
     @Override
     public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs,
             String sortOrder) {
-        return null;
+        File file = resolve(uri);
+        if (file == null || !file.isFile()) {
+            return null;
+        }
+        String[] columns = projection != null ? projection
+                : new String[] {OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE};
+        MatrixCursor cursor = new MatrixCursor(columns, 1);
+        MatrixCursor.RowBuilder row = cursor.newRow();
+        for (String column : columns) {
+            if (OpenableColumns.DISPLAY_NAME.equals(column)) {
+                row.add(file.getName());
+            } else if (OpenableColumns.SIZE.equals(column)) {
+                row.add(file.length());
+            } else {
+                row.add(null);
+            }
+        }
+        return cursor;
     }
 }

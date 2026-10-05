@@ -12,3 +12,8 @@ local.properties
 *.iml
 .idea/
 captures/
+
+# 正式签名密钥与口令：绝不入库（丢失将无法再发布更新，请另行备份）
+.signing/
+*.keystore
+!debug.keystore

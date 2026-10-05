@@ -175,10 +175,10 @@ class CloudflaredManager {
     const exe = this.resolvedPath();
     let args;
     if (kind === 'token') {
-      args = ['tunnel', 'run', '--token', this.config.token, '--no-autoupdate', '--edge-ip-version', '4'];
+      args = ['tunnel', 'run', '--token', this.config.token, '--no-autoupdate', '--edge-ip-version', '4', '--protocol', 'http2'];
     } else {
       const target = this.config.url || 'http://127.0.0.1:3000';
-      args = ['tunnel', '--url', target, '--no-autoupdate', '--edge-ip-version', '4'];
+      args = ['tunnel', '--url', target, '--no-autoupdate', '--edge-ip-version', '4', '--protocol', 'http2'];
     }
     this.logFor(t, `启动命令：${exe} ${args.map((a) => (a.includes(' ') ? `"${a}"` : a)).join(' ')}`);
 

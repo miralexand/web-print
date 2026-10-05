@@ -14,4 +14,8 @@
     <item name="share_result_text" type="id" />
     <item name="share_summary_text" type="id" />
     <item name="share_open_servers_button" type="id" />
+    <item name="share_preview_scroll" type="id" />
+    <item name="share_page_from_input" type="id" />
+    <item name="share_page_to_input" type="id" />
+    <item name="share_pages_all_button" type="id" />
 </resources>

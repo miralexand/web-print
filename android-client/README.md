@@ -127,7 +127,8 @@ node scripts\version.js 2.2.0 --code   :: 只输出 20200
 | 手动触发（Actions → Build Android Client → Run workflow） | 可用 `version_name` 指定版本，留空则用 `gradle.properties` 的默认值 |
 | 改动 `android-client/**` 的 Pull Request | 只做构建验证，不发布 |
 
-产物名为 `WebPrintClient-<版本>.apk`。同一个 tag 也会触发桌面端工作流，
+产物名为 `WebPrintClient-<版本>.apk`（已签名）或 `WebPrintClient-<版本>-debug.apk`
+（未配置签名密钥时）。同一个 tag 也会触发桌面端工作流，
 两者各自往同一个 Release 追加文件，互不覆盖发布说明。
 
 **可选：配置正式签名。** 在仓库 `Settings → Secrets and variables → Actions` 添加：

@@ -30,7 +30,7 @@
 1. 打开 [Releases](https://github.com/miralexand/web-print/releases) 下载：
    - `WebPrintTray-Setup-<版本>.exe`（安装版，推荐）或
    - `WebPrintTray-<版本>-x64.zip`（免安装绿色版，解压双击 `WebPrintTray.exe`）
-   - `WebPrintClient-<版本>.apk`（安卓客户端，可选）
+   - `WebPrintClient-<版本>[-debug].apk`（安卓客户端，可选；配置签名密钥后为已签名包）
 2. 运行程序，托盘出现图标，窗口自动打开，**网页服务与打印服务自动启动**。
 3. 点「打开 Web 打印界面」，或访问 <http://127.0.0.1:3000>；默认账号 `admin / admin123`（登录后在「用户管理」中修改）。
 4. 上传文件即可打印。需要外网访问时，在「Cloudflare 隧道」页启动隧道。

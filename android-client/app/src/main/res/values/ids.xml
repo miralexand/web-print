@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  分享打印页（ShareActivity）的控件 id。
+
+  页面依旧完全由 Java 代码搭建（不引入布局 XML），这里只声明 id 常量，
+  代码里通过 view.setId(R.id.share_xxx) 关联，使 uiautomator dump 中能出现
+  resource-id="com.webprint.client:id/share_xxx"，便于自动化测试稳定定位控件。
+-->
+<resources>
+    <item name="share_server_spinner" type="id" />
+    <item name="share_copies_input" type="id" />
+    <item name="share_print_button" type="id" />
+    <item name="share_cancel_button" type="id" />
+    <item name="share_result_text" type="id" />
+    <item name="share_summary_text" type="id" />
+    <item name="share_open_servers_button" type="id" />
+</resources>

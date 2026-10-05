@@ -1,0 +1,76 @@
+plugins {
+    id 'com.android.application'
+}
+
+// 版本号：优先用命令行 -P 覆盖（CI 从 tag 传入），否则取 gradle.properties 里的默认值
+def wpVersionName = (project.findProperty('versionName')
+        ?: project.findProperty('webprint.versionName') ?: '1.0.0').toString()
+def wpVersionCode = (project.findProperty('versionCode')
+        ?: project.findProperty('webprint.versionCode') ?: '1').toString().toInteger()
+
+// 正式签名：仅当环境变量注入了 keystore 时启用（CI 通过 Secrets 提供）。
+// 未配置时 release 产物不签名，日常开发用 debug 构建即可。
+def wpKeystore = System.getenv('WEBPRINT_KEYSTORE') ?: ''
+def wpHasKeystore = wpKeystore && file(wpKeystore).exists()
+
+android {
+    namespace 'com.webprint.client'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.webprint.client'
+        minSdk 24
+        targetSdk 34
+        versionCode wpVersionCode
+        versionName wpVersionName
+    }
+
+    signingConfigs {
+        debug {
+            // 默认调试密钥库位于用户目录（~/.android），某些环境不可写。
+            // 项目内自带一份仅用于 debug 的密钥库（标准口令 android），存在则优先使用。
+            def localDebugKey = file('../debug.keystore')
+            if (localDebugKey.exists()) {
+                storeFile localDebugKey
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
+            }
+        }
+        if (wpHasKeystore) {
+            release {
+                storeFile file(wpKeystore)
+                storePassword System.getenv('WEBPRINT_KEYSTORE_PASSWORD') ?: ''
+                keyAlias System.getenv('WEBPRINT_KEY_ALIAS') ?: ''
+                keyPassword System.getenv('WEBPRINT_KEY_PASSWORD') ?: ''
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
+        release {
+            minifyEnabled false
+            // 薄壳无自有业务代码，暂不配置混淆
+            if (wpHasKeystore) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+    }
+}
+
+dependencies {
+    // 仅用于二维码解码（纯 Java，无 AndroidX 依赖）
+    implementation 'com.google.zxing:core:3.5.3'
+}

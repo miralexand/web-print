@@ -7,6 +7,7 @@ const ALLOWED_EXT = {
   '.png': 'image',
   '.jpg': 'image',
   '.jpeg': 'image',
+  '.txt': 'text',
   '.doc': 'office',
   '.docx': 'office',
   '.xls': 'office',
@@ -42,6 +43,9 @@ function checkMagic(ext, buf) {
     case '.xlsx':
     case '.pptx':
       return startsWith(buf, [0x50, 0x4b, 0x03, 0x04]); // ZIP
+    case '.txt':
+      // 纯文本没有魔数可校验；拒绝含 NUL 的内容，避免二进制文件伪装成文本
+      return !buf.includes(0);
     case '.doc':
     case '.xls':
     case '.ppt':
@@ -68,7 +72,7 @@ function validateUpload(file, maxSize) {
     return { ok: false, error: `禁止上传的文件类型：${ext}` };
   }
   if (!ALLOWED_EXT[ext]) {
-    return { ok: false, error: `不支持的文件类型：${ext || '未知'}，仅支持 PDF / 图片 / Office 文档` };
+    return { ok: false, error: `不支持的文件类型：${ext || '未知'}，仅支持 PDF / 图片 / Office 文档 / 文本` };
   }
   if (!checkMagic(ext, file.buffer)) {
     return { ok: false, error: '文件内容与扩展名不匹配，已拒绝' };

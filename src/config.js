@@ -41,4 +41,12 @@ module.exports = {
   dataFolder: process.env.DATA_FOLDER || path.join(__dirname, '..', 'data'),
 
   maxFileSize: int(process.env.MAX_FILE_SIZE, 20 * 1024 * 1024),
+
+  // 客户端接入用的对外公开地址（隧道域名）。桌面端会在隧道启动后直接写入本对象，
+  // 独立运行时可改用环境变量 PUBLIC_URL 指定。留空则回退到请求自身的 Host。
+  publicUrl: (process.env.PUBLIC_URL || '').replace(/\/+$/, ''),
+
+  // 只向客户端推荐 HTTPS 入口。客户端已限制「仅允许 HTTPS 连接」，
+  // 因此默认开启；设为 0 可恢复展示局域网明文入口（仅用于内网调试）。
+  accessHttpsOnly: process.env.ACCESS_HTTPS_ONLY !== '0',
 };

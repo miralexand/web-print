@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  策略：客户端只能通过 HTTPS（Cloudflare Tunnel 或等价的 TLS 端点）连接服务器，
+  因此这里禁止一切明文流量（cleartextTrafficPermitted="false"），
+  平台自身会拒绝 http:// 请求，即使代码里误用了明文地址也连不上。
+  仍然信任系统证书 + 用户安装的证书：用户 CA 用于企业自建 CA / 自签证书的 HTTPS 场景。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

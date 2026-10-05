@@ -110,6 +110,38 @@
         </form>
       </section>
 
+      <!-- 手机接入：扫码添加服务器地址 -->
+      <section id="access-card" class="card hidden">
+        <div class="card-head">
+          <div>
+            <h2>手机接入</h2>
+            <p class="card-sub">用手机客户端扫描下方二维码，即可自动添加本服务地址（仅支持 HTTPS）</p>
+          </div>
+        </div>
+
+        <p id="access-error" class="hint hidden"></p>
+
+        <div id="access-body" class="access-body">
+          <div class="access-fields">
+            <label>要写入二维码的服务器地址
+              <select id="access-select"></select>
+            </label>
+            <div class="access-url-row">
+              <code id="access-url" class="access-url"></code>
+              <button type="button" id="copy-url-btn" class="btn ghost">复制</button>
+              <span id="copy-msg" class="hint"></span>
+            </div>
+            <p class="hint access-tip">
+              手机客户端<strong>只允许通过 HTTPS 连接</strong>。请先在「Cloudflare 隧道」页启动隧道，
+              再选择上面的隧道地址生成二维码；明文局域网地址（<code>http://192.168.x.x</code>）手机端无法使用。
+            </p>
+          </div>
+          <div class="qr-box">
+            <img id="access-qr" class="qr-img" alt="手机接入二维码" />
+          </div>
+        </div>
+      </section>
+
       <!-- 管理员面板 -->
       <section id="admin-panel" class="card hidden">
         <div class="card-head">

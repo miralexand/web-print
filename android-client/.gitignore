@@ -1,0 +1,14 @@
+# Gradle 构建产物与本机配置
+.gradle/
+.gradle-home/
+.tools/
+.sdkroot/
+.avd/
+.android-home/
+build/
+app/build/
+/out/
+local.properties
+*.iml
+.idea/
+captures/

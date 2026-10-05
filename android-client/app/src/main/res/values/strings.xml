@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  全部用户可见文案集中在此处，Java 代码统一通过 getString(...) 读取。
+  本客户端为薄壳：真正的业务界面由 web-print 服务端网页提供。
+-->
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- 应用与通用 -->
+    <string name="app_name">打印助手</string>
+    <string name="ok">确定</string>
+    <string name="cancel">取消</string>
+    <string name="delete">删除</string>
+    <string name="retry">重试</string>
+    <string name="unknown">未知</string>
+
+    <!-- 服务器列表 -->
+    <string name="servers_title">服务器</string>
+    <string name="servers_empty">还没有添加服务器。\n请点「手动添加」输入地址，或点「扫码添加」扫描服务端显示的二维码。\n地址必须是 https:// 开头的安全地址。</string>
+    <string name="servers_hint">点击选择服务器，长按可删除（仅支持 https:// 地址）</string>
+    <string name="server_active_mark">当前</string>
+    <string name="server_unnamed">未命名服务器</string>
+    <string name="add_manual">手动添加</string>
+    <string name="add_scan">扫码添加</string>
+
+    <!-- 手动添加对话框 -->
+    <string name="dialog_add_title">添加服务器</string>
+    <string name="dialog_add_url">地址（仅 https）</string>
+    <string name="dialog_add_url_hint">https://xxx.trycloudflare.com</string>
+    <string name="dialog_add_name">名称（可选）</string>
+    <string name="dialog_add_name_hint">例如：机房三楼</string>
+
+    <!-- 地址校验 -->
+    <string name="err_url_empty">请输入服务器地址</string>
+    <string name="err_url_scheme">地址必须以 https:// 开头，不支持 http:// 等明文地址</string>
+    <string name="err_url_host">地址中缺少主机名或 IP</string>
+    <string name="err_url_invalid">地址格式不正确，请输入 https:// 开头的地址（例如 https://xxx.trycloudflare.com）</string>
+    <string name="err_duplicate">该服务器已存在</string>
+
+    <!-- 删除确认 -->
+    <string name="dialog_delete_title">删除服务器</string>
+    <string name="dialog_delete_message">确定要删除「%1$s」吗？</string>
+    <string name="toast_deleted" tools:ignore="PluralsCandidate">已删除</string>
+
+    <!-- 扫码页 -->
+    <string name="scan_title">扫码添加</string>
+    <string name="scan_hint">将二维码放入取景框内</string>
+    <string name="scan_failed_not_url">二维码不是有效的服务地址</string>
+    <string name="scan_added">已添加服务器：%1$s</string>
+    <string name="scan_cancel">取消</string>
+    <string name="scan_no_camera">无法打开摄像头，请改用手动添加</string>
+    <string name="scan_permission_denied">未获得相机权限，无法扫码。\n请在系统设置中允许本应用使用相机，或改用手动添加。</string>
+
+    <!-- 主界面 -->
+    <string name="menu_switch_server">切换服务器</string>
+    <string name="menu_refresh">刷新</string>
+    <string name="menu_open_browser">浏览器打开</string>
+    <string name="menu_about">关于</string>
+    <string name="no_server">尚未配置服务器</string>
+    <string name="error_title">无法连接到服务器</string>
+    <string name="error_hint">请确认这台电脑（服务器）已开机并且和手机在同一网络，地址填写正确。</string>
+    <string name="error_detail">错误信息：%1$s</string>
+    <string name="page_not_found">服务器返回错误（HTTP %1$d）</string>
+    <string name="opening_browser">已交给系统浏览器打开</string>
+    <string name="no_browser">没有可以打开该链接的应用</string>
+    <string name="toast_permission_denied">权限被拒绝，无法选择文件</string>
+    <string name="chooser_title">选择打印文件</string>
+    <string name="press_back_again">再按一次返回键退出</string>
+
+    <!-- HTTPS 证书确认（只在平台无法校验证书时出现） -->
+    <string name="ssl_dialog_title">证书无法验证</string>
+    <string name="ssl_dialog_message">无法验证服务器的 HTTPS 证书，连接可能不安全。\n\n可能原因：使用了自签名证书、企业自建 CA，或证书与当前地址不匹配。\n\n继续访问会跳过证书校验，存在被中间人窃听或篡改的风险。\n请仅在你确认该地址可信时选择「继续」；否则请选择「取消」。</string>
+    <string name="ssl_continue">继续</string>
+    <string name="ssl_cancel">取消</string>
+    <string name="ssl_error_detail">证书校验失败：%1$s</string>
+
+    <!-- 分享打印（ShareActivity） -->
+    <string name="share_title">打印助手</string>
+    <string name="share_summary_title">即将打印</string>
+    <string name="share_batch">共 %1$d 个文件</string>
+    <string name="share_text_title">文字内容</string>
+    <string name="share_text_meta">共 %1$d 个字符</string>
+    <string name="share_size_unknown">大小未知</string>
+    <string name="share_server_label">服务器</string>
+    <string name="share_copies_label">份数（1-99）</string>
+    <string name="share_print">打印</string>
+    <string name="share_cancel">取消</string>
+    <string name="share_open_servers">去添加服务器</string>
+    <string name="share_no_server">尚未配置服务器，请先添加服务器地址（仅支持 https:// 地址）。</string>
+    <string name="share_uploading">正在上传…</string>
+    <string name="share_done">已提交打印</string>
+    <string name="share_batch_done">全部提交完成</string>
+    <string name="share_batch_failed">有 %1$d 个文件提交失败</string>
+    <string name="share_item_progress">正在处理第 %1$d/%2$d 个文件…</string>
+    <string name="share_remaining">，剩余 %1$d 次</string>
+    <string name="share_err_no_item">没有收到可打印的内容</string>
+    <string name="share_err_read">无法读取所选内容：%1$s</string>
+    <string name="share_err_size">文件超过大小限制（最大 20MB）</string>
+    <string name="share_err_type">该文件类型服务器不支持，仅支持 PDF / 图片 / Office 文档 / 文本</string>
+    <string name="share_err_extension">无法识别文件类型（缺少扩展名）</string>
+    <string name="share_err_unknown_size">无法确定文件大小，请换一个应用重新分享</string>
+    <string name="share_err_text_empty">没有可打印的文字内容</string>
+    <string name="share_err_text_too_long">文本过长（最大 100KB）</string>
+    <string name="share_err_copies">份数请输入 1-99 之间的整数</string>
+    <string name="share_err_insecure_url">服务器地址不是 https:// 安全地址，已取消</string>
+    <string name="share_err_network">无法连接到服务器：%1$s</string>
+    <string name="share_err_http">服务器返回错误（HTTP %1$d）</string>
+    <string name="share_err_response">服务器返回内容无法解析：%1$s</string>
+    <string name="share_err_quota">打印次数已用完（HTTP 429）：%1$s</string>
+    <string name="share_err_upload">上传失败：%1$s</string>
+
+    <!-- 关于 -->
+    <string name="about_title">关于</string>
+    <string name="about_version">版本 %1$s</string>
+    <string name="about_body">这是一台服务器的手机客户端外壳：打印、任务、配额与登录等功能都由服务器网页提供。\n服务器地址由用户自行配置，请只添加你信任的地址。</string>
+
+</resources>

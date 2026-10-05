@@ -30,9 +30,12 @@
 1. 打开 [Releases](https://github.com/miralexand/web-print/releases) 下载：
    - `WebPrintTray-Setup-<版本>.exe`（安装版，推荐）或
    - `WebPrintTray-<版本>-x64.zip`（免安装绿色版，解压双击 `WebPrintTray.exe`）
+   - `WebPrintClient-<版本>.apk`（安卓客户端，可选）
 2. 运行程序，托盘出现图标，窗口自动打开，**网页服务与打印服务自动启动**。
 3. 点「打开 Web 打印界面」，或访问 <http://127.0.0.1:3000>；默认账号 `admin / admin123`（登录后在「用户管理」中修改）。
 4. 上传文件即可打印。需要外网访问时，在「Cloudflare 隧道」页启动隧道。
+5. 手机端：启动隧道后，在网页的「手机接入」卡片扫码添加服务器；
+   客户端**只允许 HTTPS**，详见 [`android-client/README.md`](./android-client/README.md)。
 
 > 前置：本机打印机驱动已安装、Windows 可正常打印；Word/Excel/PPT 转 PDF 需本机安装 **WPS** 或 **Microsoft Office**（任一即可，默认 WPS 优先）。
 
@@ -46,6 +49,8 @@
 - **可靠的任务队列**：顺序执行、状态实时可见、失败自动重试、配额自动退还、任务可删除。
 - **贴心的打印选项**：上传即时**文档预览**、**移除重选**、**起止页码**、份数、黑白/彩色、纸张、指定打印机。
 - **托盘常驻**：关闭窗口最小化到系统托盘，托盘菜单可开关各服务。
+- **安卓客户端（薄壳）**：扫码即可添加服务器（支持多台机器），任意 App 里「分享 → 打印助手」直接打印；
+  仅允许 HTTPS 隧道连接，APK 由 GitHub Actions 构建，见 [`android-client/`](./android-client/README.md)。
 
 ## 功能特性
 
@@ -162,6 +167,8 @@ WebPrintTray（单个 Electron 应用）
 | POST | `/api/print` | 否* | 上传并创建打印任务（支持 `pages`、`copies` 等） |
 | GET | `/api/tasks` · GET/DELETE `/api/tasks/:id` | 否* | 任务列表 / 详情 / 删除 |
 | GET | `/api/printers` · `/api/status` | 否 | 打印机列表 / 打印服务在线状态 |
+| POST | `/api/print/text` | 否* | 纯文本打印，落盘为带 UTF-8 BOM 的 `.txt` 后复用同一队列 |
+| GET | `/api/access-info` · `/api/qrcode` | 否 | 客户端接入地址探测 / 地址二维码（SVG），供手机扫码添加服务器 |
 
 管理员接口：`GET/POST /api/admin/users`、`PATCH/DELETE /api/admin/users/:id`、`GET /api/admin/usage`、`POST /api/admin/usage/reset`。
 
@@ -215,8 +222,14 @@ web-print/
 │   ├── renderer/              # 图形界面（Vue3 + Element Plus）
 │   ├── scripts/               # copy-server.js / copy-vendor.js / make-icons.js
 │   └── build/                 # 图标资源（icon.svg / icon.png / icon.ico / tray.png）
+├── android-client/            # 安卓客户端（薄壳 WebView，仅 HTTPS + 分享面板打印）
+│   ├── app/src/main/java/com/webprint/client/
+│   ├── scripts/version.js     # versionName -> versionCode 推导
+│   └── README.md              # 构建、版本号与发布说明
 ├── docs/                      # 教程与截图
 ├── .github/workflows/         # GitHub Actions 构建与发布
+│   ├── build-desktop.yml      # Windows 桌面端
+│   └── build-android.yml      # 安卓 APK
 └── LICENSE
 ```
 

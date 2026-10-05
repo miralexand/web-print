@@ -13,6 +13,7 @@ const { attachUser, requireAuth, requireAdmin } = require('./middleware/auth');
 const authRoutes = require('./routes/auth');
 const printRoutes = require('./routes/print');
 const adminRoutes = require('./routes/admin');
+const accessRoutes = require('./routes/access');
 
 const app = express();
 
@@ -49,6 +50,8 @@ app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] })
 
 app.use('/api', authRoutes);
 app.use('/api/admin', requireAuth, requireAdmin, adminRoutes);
+// 客户端接入：地址探测与二维码，无需登录（与 /health、/api/status 一致）
+app.use('/api', accessRoutes);
 app.use('/api', printRoutes);
 
 app.use((req, res) => {

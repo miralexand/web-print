@@ -74,7 +74,22 @@ try {
   } else {
     $app = New-App $word
     $app.Visible = $false; $app.DisplayAlerts = 0
-    $doc = $app.Documents.Open($in, $false, $true)
+    Quiet { $app.Options.ConfirmConversions = $false }
+    # 纯文本：仅当带 UTF-8 BOM 时才显式指定 65001。
+    # 不带 BOM 的旧文本多为 GBK，保持系统 ANSI 默认解码才不会乱码。
+    $utf8 = $false
+    if ($ext -eq '.txt') {
+      try {
+        $head = [System.IO.File]::ReadAllBytes($in)
+        $utf8 = ($head.Length -ge 3 -and $head[0] -eq 0xEF -and $head[1] -eq 0xBB -and $head[2] -eq 0xBF)
+      } catch { $utf8 = $false }
+    }
+    if ($utf8) {
+      try { $doc = $app.Documents.Open($in, $false, $true, $false, '', '', $false, '', '', 0, 65001) }
+      catch { $doc = $app.Documents.Open($in, $false, $true) }
+    } else {
+      $doc = $app.Documents.Open($in, $false, $true)
+    }
     $doc.ExportAsFixedFormat($out, 17)
     Quiet { $doc.Close($false) }; Quiet { $app.Quit() }
   }

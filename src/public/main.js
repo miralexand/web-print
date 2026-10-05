@@ -457,6 +457,115 @@ async function loadUsage() {
   }
 }
 
+// ---------------- 手机接入（扫码添加） ----------------
+const MAX_QR_BYTES = 1024; // 与后端 /api/qrcode 的上限保持一致
+let accessCandidates = [];
+
+async function loadAccessInfo() {
+  const card = $('access-card');
+  const errorEl = $('access-error');
+  try {
+    const data = await api('/api/access-info');
+    const list = Array.isArray(data.candidates) ? data.candidates : [];
+    if (!list.length) {
+      // 客户端只允许 HTTPS：没有可用 https 入口时给出明确指引，而不是笼统报错
+      accessCandidates = [];
+      $('access-body').classList.add('hidden');
+      errorEl.textContent = data.hint || '当前没有可用的 HTTPS 接入地址。';
+      errorEl.classList.remove('hidden');
+      card.classList.remove('hidden');
+      return;
+    }
+    accessCandidates = list;
+    const select = $('access-select');
+    select.innerHTML = '';
+    list.forEach((item, index) => {
+      const opt = document.createElement('option');
+      opt.value = String(index);
+      // 回环地址手机无法访问，额外标注避免误选；隧道地址为推荐项
+      const suffix = item.kind === 'loopback' ? '（手机无法访问）' : (item.kind === 'tunnel' ? '（推荐）' : '');
+      opt.textContent = `${item.label}${suffix}`;
+      select.appendChild(opt);
+    });
+    // 隧道地址优先：客户端仅允许 HTTPS，明文入口对手机没有意义
+    const preferred = list.findIndex((item) => item.kind === 'tunnel');
+    const currentIndex = list.findIndex((item) => item.kind === 'current');
+    select.value = String(preferred >= 0 ? preferred : (currentIndex >= 0 ? currentIndex : 0));
+    errorEl.classList.add('hidden');
+    $('access-body').classList.remove('hidden');
+    renderAccessQr();
+    card.classList.remove('hidden');
+  } catch (err) {
+    // 接口不可用时只做提示，不影响页面其他功能
+    $('access-body').classList.add('hidden');
+    errorEl.textContent = `无法获取接入地址：${err.message}`;
+    errorEl.classList.remove('hidden');
+    card.classList.remove('hidden');
+  }
+}
+
+function renderAccessQr() {
+  const item = accessCandidates[Number($('access-select').value)] || accessCandidates[0];
+  if (!item) return;
+  $('access-url').textContent = item.url;
+  $('copy-msg').textContent = '';
+  const img = $('access-qr');
+  // 内容过长时后端返回 400，img 只会加载失败，这里提前判断
+  if (byteLength(item.url) > MAX_QR_BYTES) {
+    img.removeAttribute('src');
+    img.classList.add('hidden');
+    $('copy-msg').textContent = '地址过长，无法生成二维码';
+    return;
+  }
+  img.classList.remove('hidden');
+  img.src = `/api/qrcode?data=${encodeURIComponent(item.url)}&scale=6&margin=4`;
+}
+
+async function copyAccessUrl() {
+  const url = $('access-url').textContent || '';
+  if (!url) return;
+  const ok = await copyText(url);
+  const msg = $('copy-msg');
+  msg.textContent = ok ? '已复制' : '复制失败，请手动选择地址';
+  setTimeout(() => { if (msg.textContent) msg.textContent = ''; }, 2000);
+}
+
+// 页面常以 http 在内网提供，此时 navigator.clipboard 不可用，回落到 execCommand
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (_) { /* 回落到 execCommand */ }
+  try {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.top = '-1000px';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    area.setSelectionRange(0, area.value.length);
+    const ok = document.execCommand('copy');
+    document.body.removeChild(area);
+    return ok;
+  } catch (_) {
+    return false;
+  }
+}
+
+function byteLength(str) {
+  const text = String(str == null ? '' : str);
+  return typeof TextEncoder === 'function' ? new TextEncoder().encode(text).length : text.length;
+}
+
+$('access-select').addEventListener('change', renderAccessQr);
+$('copy-url-btn').addEventListener('click', copyAccessUrl);
+$('access-qr').addEventListener('load', () => { $('copy-msg').textContent = ''; });
+$('access-qr').addEventListener('error', () => { $('copy-msg').textContent = '二维码生成失败，请换一个地址'; });
+
 // ---------------- 工具 ----------------
 function formatTime(iso) {
   if (!iso) return '-';
@@ -485,6 +594,7 @@ $('refresh-usage').addEventListener('click', () => loadUsage());
   loadPrinters();
   checkAgent();
   refreshTasks();
+  loadAccessInfo();
   startRefresh();
   if (currentUser && currentUser.role === 'admin') {
     $('admin-panel').classList.remove('hidden');

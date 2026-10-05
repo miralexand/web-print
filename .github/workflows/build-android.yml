@@ -1,0 +1,151 @@
+name: Build Android Client
+
+# 触发方式：
+#   - 打 tag（v2.2.0 这类）→ 版本号自动取自 tag，并把 APK 挂到同名 Release
+#   - 手动触发（Actions 页面 → Run workflow）→ 可用输入覆盖版本号，留空则用 gradle.properties 的默认值
+#   - android-client 的 Pull Request → 仅构建验证，不发布
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: '版本名（如 2.2.0）。留空则使用 android-client/gradle.properties 中的默认值'
+        required: false
+        default: ''
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    paths:
+      - 'android-client/**'
+      - '.github/workflows/build-android.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android-client
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 安装 Android SDK 工具
+        uses: android-actions/setup-android@v3
+
+      - name: 接受许可并安装 SDK 组件
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
+
+      - name: 生成 SDK 路径配置
+        run: echo "sdk.dir=${ANDROID_SDK_ROOT:-$ANDROID_HOME}" > local.properties
+
+      - name: 缓存 Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android-client/**/*.gradle', 'android-client/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: 解析版本号
+        id: ver
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            NAME="${GITHUB_REF_NAME#v}"
+          elif [[ -n "${{ inputs.version_name }}" ]]; then
+            NAME="${{ inputs.version_name }}"
+          else
+            NAME="$(grep -E '^webprint\.versionName=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')"
+          fi
+          echo "输入版本名：$NAME"
+          # 具体推导逻辑放在 scripts/version.js，可本地直接运行与测试
+          node scripts/version.js "$NAME" | tee -a "$GITHUB_OUTPUT"
+
+      - name: 检查是否配置了签名密钥
+        id: sign
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [[ -n "$KS_B64" ]]; then
+            echo "has=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 构建 Debug APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon --console=plain \
+            -PversionName='${{ steps.ver.outputs.name }}' \
+            -PversionCode='${{ steps.ver.outputs.code }}'
+
+      - name: 解码签名密钥
+        if: steps.sign.outputs.has == 'true'
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$KS_B64" | base64 -d > release.keystore
+          {
+            echo "WEBPRINT_KEYSTORE=$PWD/release.keystore"
+            echo "WEBPRINT_KEYSTORE_PASSWORD=$KS_PASS"
+            echo "WEBPRINT_KEY_ALIAS=$KEY_ALIAS"
+            echo "WEBPRINT_KEY_PASSWORD=$KEY_PASS"
+          } >> "$GITHUB_ENV"
+
+      - name: 构建 Release APK（已签名）
+        if: steps.sign.outputs.has == 'true'
+        run: |
+          ./gradlew assembleRelease --no-daemon --console=plain \
+            -PversionName='${{ steps.ver.outputs.name }}' \
+            -PversionCode='${{ steps.ver.outputs.code }}'
+
+      - name: 整理构建产物
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          NAME='${{ steps.ver.outputs.name }}'
+          REL=app/build/outputs/apk/release/app-release.apk
+          DBG=app/build/outputs/apk/debug/app-debug.apk
+          if [[ -f "$REL" ]]; then
+            cp "$REL" "out/WebPrintClient-${NAME}.apk"
+            echo "已签名 release APK：out/WebPrintClient-${NAME}.apk"
+          elif [[ -f "$DBG" ]]; then
+            cp "$DBG" "out/WebPrintClient-${NAME}-debug.apk"
+            echo "未配置签名密钥，输出 debug APK：out/WebPrintClient-${NAME}-debug.apk"
+          else
+            echo "没有找到 APK 产物" >&2
+            exit 1
+          fi
+          ls -l out
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: WebPrintClient-${{ steps.ver.outputs.name }}
+          path: android-client/out/*.apk
+
+      # 与桌面端工作流共用同一个 tag Release：这里只追加 APK，不改动 Release 正文，
+      # 避免把桌面端写入的发布说明覆盖掉。
+      - name: 追加到 Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: android-client/out/*.apk

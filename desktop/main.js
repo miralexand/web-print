@@ -199,6 +199,8 @@ async function startWeb() {
   const host = config.allowLan ? '0.0.0.0' : '127.0.0.1';
   await mod.start({ port: config.webPort, host });
   webRunning = true;
+  // Web 服务刚起来时隧道可能已在运行，补一次同步
+  syncPublicUrl();
   if (config.allowLan) ensureFirewallRule(config.webPort);
 }
 
@@ -570,6 +572,22 @@ function webUrl() {
   return `http://127.0.0.1:${config.webPort}`;
 }
 
+/**
+ * 把当前隧道地址同步给内嵌 Web 服务。
+ * 手机客户端只允许 HTTPS，网页端「手机接入」的二维码必须编码隧道域名，
+ * 而不是 127.0.0.1 / 局域网 IP，因此这里把隧道地址写进共享的 config 对象。
+ * 命名隧道可能已注册为 Windows 服务，未由本程序托管，故只要配置了 publicUrl 就采用。
+ */
+function syncPublicUrl() {
+  if (!webConfig) return;
+  const cf = cloudflared ? cloudflared.state() : { quick: {}, token: {} };
+  const quickUrl = cf.quick && cf.quick.running && cf.quick.url ? cf.quick.url : '';
+  const namedUrl = config.cloudflare && config.cloudflare.publicUrl ? String(config.cloudflare.publicUrl).trim() : '';
+  const pick = quickUrl || namedUrl;
+  const url = /^https?:\/\//i.test(pick) ? pick.replace(/\/+$/, '') : '';
+  if (webConfig.publicUrl !== url) webConfig.publicUrl = url;
+}
+
 function broadcastState() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('state-changed', publicState());
@@ -578,6 +596,8 @@ function broadcastState() {
 
 // ---------- 状态 ----------
 function publicState() {
+  // 隧道地址随时可能变化（快速隧道重建、命名隧道启停），这里顺带同步给 Web 服务
+  syncPublicUrl();
   return {
     running: !!(service && service.running),
     host: '127.0.0.1',

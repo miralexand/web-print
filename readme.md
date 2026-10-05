@@ -3,9 +3,10 @@
 [![License](https://img.shields.io/badge/license-MulanPSL--2.0-blue.svg)](./LICENSE)
 [![Release](https://img.shields.io/github/v/release/miralexand/web-print)](https://github.com/miralexand/web-print/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D6.svg)](#)
+[![Android](https://img.shields.io/badge/Android-7.0%2B-3DDC84.svg?logo=android&logoColor=white)](#)
 [![Build](https://github.com/miralexand/web-print/actions/workflows/build-desktop.yml/badge.svg)](https://github.com/miralexand/web-print/actions/workflows/build-desktop.yml)
 
-> 一个可自托管的网页打印系统。**一体化 Windows 桌面应用：一个程序同时内置网页打印服务、本地打印与 Cloudflare Tunnel。**
+> 一个可自托管的网页打印系统。**一体化 Windows 桌面应用：一个程序同时内置网页打印服务、本地打印与 Cloudflare Tunnel，并自带手机端扫码打印。**
 
 - 仓库地址：<https://github.com/miralexand/web-print>
 - 下载地址：<https://github.com/miralexand/web-print/releases>
@@ -55,9 +56,11 @@
 - **可靠的任务队列**：顺序执行、状态实时可见、失败自动重试、配额自动退还、任务可删除。
 - **贴心的打印选项**：上传即时**文档预览**、**移除重选**、**起止页码**、份数、黑白/彩色、纸张、指定打印机。
 - **托盘常驻**：关闭窗口最小化到系统托盘，托盘菜单可开关各服务。
-- **安卓客户端（薄壳）**：扫码即可添加服务器（支持多台机器），任意 App 里「分享 → 打印助手」直接打印；
-  分享前可**预览页面并选择起止页码与份数**，「关于」页可**检查更新并在应用内安装**；
-  仅允许 HTTPS 隧道连接，APK 由 GitHub Actions 构建，见 [`android-client/`](./android-client/README.md)。
+- **手机扫码即用**：自带安卓客户端，**扫一下网页上的二维码就完成对接**，不用手输 IP；
+  支持同时保存多台打印主机并随时切换，出门在外走 Cloudflare 隧道也能打。
+- **分享面板直接打印**：在微信、相册、文件管理器里选中内容 →「分享 → 打印助手」就能打印，
+  不必先打开 App；分享前可**预览 PDF/图片页面、圈定起止页码、设置份数**。
+- **客户端可自更新**：手机端「关于」页能检查新版本并在应用内直接下载安装，不用回电脑取包。
 
 ## 功能特性
 
@@ -73,7 +76,26 @@
 - **托盘与自启**：托盘常驻、开机自启、随程序启动隧道
 - **安装与更新**：安装版通过安装包覆盖升级，绿色版解压覆盖升级；「关于」页可检查更新并一键更新
 - **关于页**：版本、仓库地址、问题反馈、**检查更新**（发现新版本可**一键覆盖更新**或前往发布页）、开源协议
-- **安卓客户端**：多服务器扫码接入、分享面板直接打印、PDF/图片**页面预览 + 起止页码**、关于页**检查更新并在应用内下载安装**
+- **安卓客户端**：见下方「手机端打印」一节，源码与构建说明在 [`android-client/`](./android-client/README.md)
+
+## 手机端打印
+
+除了浏览器，本项目还附带一个安卓客户端（薄壳 WebView），用来补上浏览器做不到的几件事：
+
+- **扫码接入**：网页端「手机接入」卡片会把当前隧道地址生成二维码，手机扫一下就添加完成，
+  不用手输 IP。服务端装在多台电脑上时，可以保存多个地址来回切换。
+- **分享面板打印**：在微信、相册、文件管理器里选中内容 →「分享 → 打印助手」直接打印；
+  支持文字、PDF / 图片 / Office / txt，也能一次分享多个文件。
+- **页面预览与页码**：分享单个 PDF 时渲染页面缩略图，点选起始页与结束页，并设置份数。
+- **应用内更新**：「关于」页检查新版本并直接下载安装。
+
+其余功能（登录、上传、任务列表、配额）都由服务端网页提供，客户端不重复实现。
+出于安全考虑客户端**只允许 HTTPS 连接**（即必须走 Cloudflare 隧道，局域网明文地址不可用），
+细节与已知限制见 [`android-client/README.md`](./android-client/README.md)。
+
+APK 在 [Releases](https://github.com/miralexand/web-print/releases) 里，文件名形如
+`WebPrintClient-<版本>.apk`；由 GitHub Actions 自动构建（见
+[`build-android.yml`](./.github/workflows/build-android.yml)）。
 
 ## 技术栈
 
@@ -87,6 +109,7 @@
 | 文档转换 | **WPS COM（KWPS/KET/KWPP）→ Microsoft Office COM（Word/Excel/PowerPoint）**，经 PowerShell 调用 |
 | 内网穿透 | **Cloudflare Tunnel（cloudflared）**，快速隧道 / 命名隧道 |
 | 打包发布 | **electron-builder**（NSIS 安装包 + 免安装 zip）+ **GitHub Actions** |
+| 安卓客户端 | **纯 Java + 框架原生控件**（薄壳 WebView），唯一依赖 ZXing core；APK 约 285 KB |
 
 ## 架构
 

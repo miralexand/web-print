@@ -10,3 +10,7 @@ desktop/server/
 token/
 .env
 *.log
+
+# 安卓签名密钥备份（含明文口令，绝不入库）
+WebPrint-Signing-Backup/
+webprint-signing-backup/

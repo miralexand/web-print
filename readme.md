@@ -18,6 +18,10 @@
 
 ## 界面预览
 
+**宣传视频**
+
+https://github.com/user-attachments/assets/872ea2af-2369-4f80-9bd4-6d3df1fd4df9
+
 **桌面应用（概览 / 隧道 / 设置 / 关于）**
 
 ![桌面应用](docs/screenshots/desktop-overview.png)

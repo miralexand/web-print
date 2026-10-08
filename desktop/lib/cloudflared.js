@@ -14,6 +14,17 @@ const { spawn, execFile } = require('child_process');
 const URL_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/gi;
 const QUICK_URL_WAIT_MS = 30000;
 
+// 命名隧道：cloudflared 启动后会把从 Cloudflare 拉取的远端配置打印到日志里，
+// 其 ingress 规则带有 hostname（形如 \"hostname\":\"print.example.com\"）。
+// 从中提取固定域名，供网页端「手机接入」生成二维码；免去用户手填公开地址。
+const HOSTNAME_RE = /\\?"hostname\\?"\s*:\s*\\?"([^"\\]+)\\?"/gi;
+
+function extractTunnelHostname(text) {
+  HOSTNAME_RE.lastIndex = 0;
+  const m = HOSTNAME_RE.exec(text);
+  return m ? m[1].toLowerCase() : '';
+}
+
 function findCloudflared(extra) {
   const candidates = [
     extra,
@@ -76,6 +87,7 @@ function makeTunnel() {
     urlTimer: null,
     stopping: false,
     spawnFailed: false,
+    raw: '',
   };
 }
 
@@ -151,6 +163,7 @@ class CloudflaredManager {
     t.stopping = false;
     t.error = '';
     t.url = '';
+    t.raw = '';
     t.spawnFailed = false;
     this.clearUrlTimer(t);
 
@@ -209,13 +222,30 @@ class CloudflaredManager {
     const handle = (chunk) => {
       const text = chunk.toString();
       this.logFor(t, text);
-      const matches = text.match(URL_RE);
-      if (matches && matches.length) {
-        t.url = matches[matches.length - 1];
-        t.starting = false;
-        t.retries = 0;
-        this.clearUrlTimer(t);
-        this.onChange();
+      // 日志可能被拆分到多个 chunk，累积一小段再匹配，避免跨块漏掉
+      t.raw = (t.raw + text).slice(-8000);
+
+      if (kind === 'quick') {
+        const matches = t.raw.match(URL_RE);
+        if (matches && matches.length) {
+          t.url = matches[matches.length - 1];
+          t.starting = false;
+          t.retries = 0;
+          this.clearUrlTimer(t);
+          this.onChange();
+        }
+        return;
+      }
+
+      // 命名隧道：从远端配置日志中解析出固定域名
+      const hostname = extractTunnelHostname(t.raw);
+      if (hostname) {
+        const url = `https://${hostname}`;
+        if (t.url !== url) {
+          t.url = url;
+          t.starting = false;
+          this.onChange();
+        }
       }
     };
     t.proc.stdout.on('data', handle);
@@ -238,6 +268,7 @@ class CloudflaredManager {
       t.starting = false;
       t.proc = null;
       t.url = '';
+      t.raw = '';
       this.clearUrlTimer(t);
       if (!t.spawnFailed) {
         if (kind === 'quick' && !t.stopping && t.retries < 3) {
@@ -280,6 +311,7 @@ class CloudflaredManager {
       this.managedByService = false;
       t.running = false;
       t.url = '';
+      t.raw = '';
       this.onChange();
       return this.state();
     }
@@ -295,6 +327,7 @@ class CloudflaredManager {
     t.running = false;
     t.proc = null;
     t.url = '';
+    t.raw = '';
     this.onChange();
     return this.state();
   }

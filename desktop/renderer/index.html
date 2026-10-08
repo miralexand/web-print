@@ -102,13 +102,13 @@
 
             <div class="stat-card">
               <div class="stat-head"><span class="stat-name">命名隧道</span><span class="dot" :class="tunnel.token.running ? 'on' : 'off'"></span></div>
-              <div class="stat-value">{{ tunnel.token.publicUrl || (tunnel.token.running ? (tunnel.managedByService ? '运行中（系统服务）' : '运行中') : '未启动') }}</div>
+              <div class="stat-value">{{ tunnel.token.url || tunnel.token.publicUrl || (tunnel.token.running ? (tunnel.managedByService ? '运行中（系统服务）' : '运行中') : '未启动') }}</div>
               <div class="stat-desc">固定域名（Token），需在 Cloudflare 创建并配置</div>
               <div class="stat-actions">
                 <el-button v-if="!tunnel.token.running" type="primary" size="small" @click="startNamedTunnel" :loading="busy.tunnel">启动</el-button>
                 <el-button v-else size="small" @click="stopNamedTunnel" :loading="busy.tunnel">停止</el-button>
-                <el-button size="small" :disabled="!tunnel.token.publicUrl" @click="copyText(tunnel.token.publicUrl)">复制</el-button>
-                <el-button size="small" :disabled="!tunnel.token.publicUrl" @click="openExternal(tunnel.token.publicUrl)">打开</el-button>
+                <el-button size="small" :disabled="!(tunnel.token.url || tunnel.token.publicUrl)" @click="copyText(tunnel.token.url || tunnel.token.publicUrl)">复制</el-button>
+                <el-button size="small" :disabled="!(tunnel.token.url || tunnel.token.publicUrl)" @click="openExternal(tunnel.token.url || tunnel.token.publicUrl)">打开</el-button>
                 <el-button size="small" @click="tab = 'tunnel'">配置</el-button>
               </div>
             </div>
@@ -212,8 +212,8 @@
                 <div class="hint">会自动提取其中的 Token，并保存到本机配置（下次打开自动带出）。</div>
               </el-form-item>
               <el-form-item label="公开地址">
-                <el-input v-model="tokenForm.publicUrl" placeholder="如 https://print.example.com（用于概览复制/打开，可留空）" />
-                <div class="hint">填写你在 Cloudflare 配置的 Public Hostname，便于在概览页一键复制 / 打开。</div>
+                <el-input v-model="tokenForm.publicUrl" placeholder="如 https://print.example.com（可留空，应用会自动识别）" />
+                <div class="hint">填写你在 Cloudflare 配置的 Public Hostname（裸域名会自动补全 https）。留空时，应用会从 cloudflared 日志自动识别；若隧道由 Windows 系统服务托管，请手动填写，以便概览页复制 / 打开与生成手机接入二维码。</div>
               </el-form-item>
               <el-form-item label="随程序启动"><el-switch v-model="tokenForm.autoStart" /></el-form-item>
               <el-form-item>

@@ -206,6 +206,22 @@ label.checkbox input { width: auto; }
 .usage-head { margin-top: 26px; }
 
 /* 手机接入 */
+.apk-tip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--accent-weak);
+}
+.apk-tip-text { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 200px; }
+.apk-tip-text strong { font-size: 13.5px; }
+.apk-tip-text span { color: var(--muted); font-size: 12.5px; line-height: 1.55; }
+.apk-tip .btn { flex: none; }
+
 .access-body {
   display: grid;
   grid-template-columns: 1fr auto;

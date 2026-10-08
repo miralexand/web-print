@@ -33,6 +33,17 @@ function requestOrigin(req) {
   return `${req.protocol}://127.0.0.1:${requestPort(req)}`;
 }
 
+/**
+ * 归一化对外公开地址：裸域名自动补全 https 并去掉末尾斜杠。
+ * 客户端仅允许 HTTPS，命名隧道（固定域名）必须走 https，因此裸域名按 https 处理。
+ */
+function normalizePublicUrl(value) {
+  let url = String(value == null ? '' : value).trim();
+  if (!url) return '';
+  if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+  return url.replace(/\/+$/, '');
+}
+
 /** 本机所有非回环 IPv4 地址（供手机在同一局域网内扫码接入） */
 function lanIPv4() {
   const out = [];
@@ -55,7 +66,7 @@ function lanIPv4() {
 router.get('/access-info', (req, res) => {
   const port = requestPort(req);
   const origin = requestOrigin(req);
-  const publicUrl = (config.publicUrl || '').replace(/\/+$/, '');
+  const publicUrl = normalizePublicUrl(config.publicUrl);
   const httpsOnly = config.accessHttpsOnly !== false;
   const candidates = [];
   const seen = new Set();
@@ -82,6 +93,8 @@ router.get('/access-info', (req, res) => {
     port,
     secure: req.protocol === 'https',
     httpsOnly,
+    // 手机客户端 APK 下载地址（可在服务端用 APK_URL 覆盖）
+    apkUrl: config.apkUrl || '',
     candidates,
     // 没有可用 https 入口时给网页端一句明确的指引
     hint: candidates.length
@@ -97,7 +110,7 @@ router.get('/access-info', (req, res) => {
 router.get('/qrcode', (req, res) => {
   const raw = typeof req.query.data === 'string' ? req.query.data : '';
   // 未指定内容时优先用配置的对外地址：客户端只认 https，回退到请求自身可能得到明文地址
-  const data = raw || config.publicUrl || requestOrigin(req);
+  const data = raw || normalizePublicUrl(config.publicUrl) || requestOrigin(req);
 
   if (Buffer.byteLength(data, 'utf8') > MAX_QR_BYTES) {
     return res.status(400).json({ error: `二维码内容过长（最大 ${MAX_QR_BYTES} 字节）` });

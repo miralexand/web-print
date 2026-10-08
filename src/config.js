@@ -49,4 +49,8 @@ module.exports = {
   // 只向客户端推荐 HTTPS 入口。客户端已限制「仅允许 HTTPS 连接」，
   // 因此默认开启；设为 0 可恢复展示局域网明文入口（仅用于内网调试）。
   accessHttpsOnly: process.env.ACCESS_HTTPS_ONLY !== '0',
+
+  // 安卓客户端 APK 下载地址，展示在网页「手机接入」卡片上。
+  // 默认指向 GitHub Releases 最新版页面；自建 / 镜像分发时可用环境变量 APK_URL 覆盖。
+  apkUrl: process.env.APK_URL || 'https://github.com/miralexand/web-print/releases/latest',
 };

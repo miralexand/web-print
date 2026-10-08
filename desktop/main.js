@@ -577,14 +577,28 @@ function webUrl() {
  * 手机客户端只允许 HTTPS，网页端「手机接入」的二维码必须编码隧道域名，
  * 而不是 127.0.0.1 / 局域网 IP，因此这里把隧道地址写进共享的 config 对象。
  * 命名隧道可能已注册为 Windows 服务，未由本程序托管，故只要配置了 publicUrl 就采用。
+ *
+ * 命名隧道的公开地址来源（优先级从高到低）：
+ *   1. 用户在「公开地址」中手填的值；
+ *   2. 从 cloudflared 远端配置日志里解析出的固定域名（cf.token.url）。
+ * 这样即使用户没填「公开地址」，只要命名隧道已启动，网页端也能生成二维码。
  */
+function normalizePublicUrl(value) {
+  let url = String(value == null ? '' : value).trim();
+  if (!url) return '';
+  // 固定域名一律走 https（客户端仅允许 HTTPS）；补全缺失的协议头
+  if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+  return url.replace(/\/+$/, '');
+}
+
 function syncPublicUrl() {
   if (!webConfig) return;
   const cf = cloudflared ? cloudflared.state() : { quick: {}, token: {} };
   const quickUrl = cf.quick && cf.quick.running && cf.quick.url ? cf.quick.url : '';
-  const namedUrl = config.cloudflare && config.cloudflare.publicUrl ? String(config.cloudflare.publicUrl).trim() : '';
-  const pick = quickUrl || namedUrl;
-  const url = /^https?:\/\//i.test(pick) ? pick.replace(/\/+$/, '') : '';
+  const manualNamed = config.cloudflare && config.cloudflare.publicUrl ? String(config.cloudflare.publicUrl).trim() : '';
+  const autoNamed = cf.token && cf.token.url ? cf.token.url : '';
+  const namedUrl = manualNamed || autoNamed;
+  const url = normalizePublicUrl(quickUrl || namedUrl);
   if (webConfig.publicUrl !== url) webConfig.publicUrl = url;
 }
 

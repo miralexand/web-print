@@ -460,12 +460,30 @@ async function loadUsage() {
 // ---------------- 手机接入（扫码添加） ----------------
 const MAX_QR_BYTES = 1024; // 与后端 /api/qrcode 的上限保持一致
 let accessCandidates = [];
+let accessRetryTimer = null;
+
+// 隧道可能在本页打开后才启动（例如命名隧道仍在连接），此时先轮询等待 HTTPS 入口出现
+function scheduleAccessRetry() {
+  if (accessRetryTimer) return;
+  accessRetryTimer = setTimeout(() => {
+    accessRetryTimer = null;
+    loadAccessInfo();
+  }, 5000);
+}
 
 async function loadAccessInfo() {
   const card = $('access-card');
   const errorEl = $('access-error');
   try {
     const data = await api('/api/access-info');
+    // 安卓客户端下载入口（服务端可通过 APK_URL 覆盖；为空则隐藏提示）
+    const apkTip = $('apk-tip');
+    if (data.apkUrl) {
+      $('apk-download').href = data.apkUrl;
+      apkTip.classList.remove('hidden');
+    } else {
+      apkTip.classList.add('hidden');
+    }
     const list = Array.isArray(data.candidates) ? data.candidates : [];
     if (!list.length) {
       // 客户端只允许 HTTPS：没有可用 https 入口时给出明确指引，而不是笼统报错
@@ -474,7 +492,12 @@ async function loadAccessInfo() {
       errorEl.textContent = data.hint || '当前没有可用的 HTTPS 接入地址。';
       errorEl.classList.remove('hidden');
       card.classList.remove('hidden');
+      scheduleAccessRetry();
       return;
+    }
+    if (accessRetryTimer) {
+      clearTimeout(accessRetryTimer);
+      accessRetryTimer = null;
     }
     accessCandidates = list;
     const select = $('access-select');

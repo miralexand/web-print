@@ -107,6 +107,7 @@
     <string name="share_err_response">服务器返回内容无法解析：%1$s</string>
     <string name="share_err_quota">打印次数已用完（HTTP 429）：%1$s</string>
     <string name="share_err_upload">上传失败：%1$s</string>
+    <string name="share_err_convert">图片转 PDF 失败：%1$s</string>
 
     <!-- 关于 -->
     <string name="about_title">关于</string>

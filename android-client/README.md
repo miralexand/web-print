@@ -61,6 +61,8 @@
 
 - 支持文字（`text/plain`）、文件（PDF / 图片 / Word / Excel / PPT / txt），
   以及一次分享多个文件（`ACTION_SEND_MULTIPLE`）。
+- PNG / JPG 图片在手机本地用系统 `PdfDocument` 转成单页 PDF（A4、按比例居中）后再上传，
+  避免打印主机用 Office/WPS 转图片不稳定。
 - 确认页显示要打印的内容（文件名+大小，或文字摘要）、服务器（多服务器时是下拉）、
   页码与份数，然后是「打印 / 取消」。
 - 单个 PDF 用框架自带的 `PdfRenderer` 渲染页面缩略图（最多 20 页）。点缩略图依次选

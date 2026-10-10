@@ -8,8 +8,12 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.graphics.pdf.PdfDocument;
 import android.graphics.pdf.PdfRenderer;
 import android.net.Uri;
 import android.os.Build;
@@ -87,6 +91,13 @@ public class ShareActivity extends Activity {
     private static final int MAX_PREVIEW_PAGES = 20;
     /** PDF 缩略图位图宽度（像素）。 */
     private static final int PREVIEW_THUMB_WIDTH = 240;
+    /** 图片转 PDF 时解码的最长边像素上限（控制内存并保证打印清晰度）。 */
+    private static final int MAX_IMAGE_SIDE = 3000;
+    /** 单页 PDF 的纸张尺寸（point，1pt = 1/72 inch）：A4。与 buildMultipart 的 paperSize 一致。 */
+    private static final int PDF_PAGE_WIDTH = 595;
+    private static final int PDF_PAGE_HEIGHT = 842;
+    /** 图片转 PDF 时的页边距（point）。 */
+    private static final int PDF_PAGE_MARGIN = 24;
 
     /** 客户端本地认定的可打印类型（扩展名 → MIME、分类），与 fileValidator.js 保持一致。 */
     private static final String[] EXTENSIONS = {
@@ -1434,10 +1445,125 @@ public class ShareActivity extends Activity {
     // 网络（工作线程）
     // ------------------------------------------------------------------
 
+    /**
+     * 判断条目是否为图片（PNG / JPG），这类文件需要先在本机转成 PDF。
+     */
+    private static boolean isImageItem(Item item) {
+        if (item == null) {
+            return false;
+        }
+        String extension = item.extension != null ? item.extension : resolveExtension(item.name, item.mime);
+        if (TextUtils.isEmpty(extension)) {
+            extension = extensionForMime(item.mime == null ? "" : item.mime);
+        }
+        return isImageExtension(extension);
+    }
+
+    /**
+     * 图片 → 单页 PDF：用系统 {@link PdfDocument} 把图片按比例居中画到 A4 页面。
+     * 返回一个新的 {@link Item}，除文件名/扩展名/MIME 改为 PDF 外，其余沿用原条目。
+     */
+    private Item toPdfItem(Item item) throws IOException {
+        Bitmap bitmap = decodeScaledBitmap(item.bytes, MAX_IMAGE_SIDE);
+        if (bitmap == null) {
+            throw new IOException("decode failed");
+        }
+        try {
+            byte[] pdf = imageToPdf(bitmap);
+            Item out = new Item();
+            out.uri = item.uri;
+            out.name = replaceExtension(item.name, ".pdf");
+            out.mime = "application/pdf";
+            out.extension = ".pdf";
+            out.bytes = pdf;
+            out.size = pdf.length;
+            return out;
+        } finally {
+            bitmap.recycle();
+        }
+    }
+
+    /** 按最长边上限解码图片（inSampleSize 降采样），避免大图占用过多内存。 */
+    private static Bitmap decodeScaledBitmap(byte[] data, int maxSide) {
+        if (data == null || data.length == 0) {
+            return null;
+        }
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(data, 0, data.length, bounds);
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            return null;
+        }
+        int sample = 1;
+        int longest = Math.max(bounds.outWidth, bounds.outHeight);
+        while (longest / sample > maxSide) {
+            sample *= 2;
+        }
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = sample;
+        return BitmapFactory.decodeByteArray(data, 0, data.length, options);
+    }
+
+    /** 把一张位图按比例居中绘制到 A4 单页 PDF，返回 PDF 字节。 */
+    private static byte[] imageToPdf(Bitmap bitmap) throws IOException {
+        PdfDocument document = new PdfDocument();
+        try {
+            PdfDocument.PageInfo info = new PdfDocument.PageInfo.Builder(
+                    PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT, 1).create();
+            PdfDocument.Page page = document.startPage(info);
+            Canvas canvas = page.getCanvas();
+            canvas.drawColor(Color.WHITE);
+
+            float availableWidth = PDF_PAGE_WIDTH - PDF_PAGE_MARGIN * 2f;
+            float availableHeight = PDF_PAGE_HEIGHT - PDF_PAGE_MARGIN * 2f;
+            float scale = Math.min(availableWidth / bitmap.getWidth(),
+                    availableHeight / bitmap.getHeight());
+            float drawWidth = bitmap.getWidth() * scale;
+            float drawHeight = bitmap.getHeight() * scale;
+            float left = (PDF_PAGE_WIDTH - drawWidth) / 2f;
+            float top = (PDF_PAGE_HEIGHT - drawHeight) / 2f;
+            RectF dst = new RectF(left, top, left + drawWidth, top + drawHeight);
+            Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
+            canvas.drawBitmap(bitmap, null, dst, paint);
+
+            document.finishPage(page);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            document.writeTo(out);
+            return out.toByteArray();
+        } finally {
+            document.close();
+        }
+    }
+
+    /** 把文件名的扩展名替换为新的扩展名（如 photo.jpg → photo.pdf）。 */
+    private static String replaceExtension(String name, String newExtension) {
+        String base = name == null ? "" : name;
+        int dot = base.lastIndexOf('.');
+        if (dot > 0) {
+            base = base.substring(0, dot);
+        }
+        if (TextUtils.isEmpty(base)) {
+            base = "image";
+        }
+        return base + newExtension;
+    }
+
     private Result submitFile(String baseUrl, String cookie, int copies, String pages, Item item) {
+        Item upload = item;
+        // 图片在客户端转成单页 PDF 再上传：打印主机用 Office/WPS 转图片不稳定，
+        // 转成 PDF 后服务端只需处理 PDF，链路更可靠。
+        if (isImageItem(item)) {
+            try {
+                upload = toPdfItem(item);
+            } catch (Throwable t) {
+                String message = TextUtils.isEmpty(t.getMessage())
+                        ? t.getClass().getSimpleName() : t.getMessage();
+                return Result.failure(item.name, getString(R.string.share_err_convert, message));
+            }
+        }
         HttpURLConnection conn = null;
         try {
-            MultipartBody body = buildMultipart(item, copies, pages);
+            MultipartBody body = buildMultipart(upload, copies, pages);
             URL url = new URL(baseUrl + "/api/print");
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");

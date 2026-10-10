@@ -931,8 +931,9 @@ if (!gotLock) {
       logLine('Web 服务启动失败:', err && err.stack ? err.stack : err);
       dialog.showErrorBox('Web 服务启动失败', `${(err && err.message) || err}\n\n请在界面中修改 Web 端口后重试。`);
     }
-    if (config.cloudflare.autoQuick) cloudflared.startQuick().catch(() => {});
+    // 快速隧道与命名隧道互斥：优先恢复命名隧道，避免启动时两者相互抢占
     if (config.cloudflare.autoToken) cloudflared.startToken().catch(() => {});
+    else if (config.cloudflare.autoQuick) cloudflared.startQuick().catch(() => {});
     updateTrayMenu();
   });
 

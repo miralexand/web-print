@@ -159,6 +159,20 @@ class CloudflaredManager {
 
   async start(kind, opts = {}) {
     const t = this.tunnel(kind);
+
+    // 快速隧道与命名隧道互斥：同一时间只允许开启一个，避免两者互相干扰
+    // （例如快速隧道的临时地址覆盖命名隧道的固定域名、两个连接器争抢同一个隧道等）。
+    const otherKind = kind === 'token' ? 'quick' : 'token';
+    if (kind === 'quick' && this.managedByService && !this.token.proc) {
+      t.error = '命名隧道正由 Windows 系统服务托管运行。两个隧道不能同时开启，请先在「命名隧道」中卸载系统服务，再启动快速隧道。';
+      this.onChange();
+      return this.state();
+    }
+    const other = this.tunnel(otherKind);
+    if (other.running || other.proc) {
+      this.stop(otherKind);
+    }
+
     if (!opts.auto) t.retries = 0;
     t.stopping = false;
     t.error = '';

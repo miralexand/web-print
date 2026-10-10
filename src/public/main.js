@@ -136,7 +136,15 @@ function setFile(file) {
   selectedFile = file;
   $('file-label').textContent = `${file.name}（${(file.size / 1024).toFixed(0)} KB）`;
   showPreview(file);
-  setMsg('', true);
+  // 图片会在提交时自动转为单页 PDF，页码无意义，禁用以免误填
+  const isImage = !!(window.WebPrintPdf && WebPrintPdf.isImageFile(file));
+  $('opt-page-from').disabled = isImage;
+  $('opt-page-to').disabled = isImage;
+  if (isImage) {
+    $('opt-page-from').value = '';
+    $('opt-page-to').value = '';
+  }
+  setMsg(isImage ? '图片将在本机自动转换为 PDF 后上传' : '', true);
 }
 
 function showPreview(file) {
@@ -175,6 +183,8 @@ function clearFile(silent) {
   if (preview) preview.classList.add('hidden');
   $('preview-img').src = '';
   $('preview-pdf').src = '';
+  $('opt-page-from').disabled = false;
+  $('opt-page-to').disabled = false;
   if (!silent) setMsg('已移除，请重新选择文件', true);
 }
 
@@ -198,17 +208,28 @@ $('print-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   setMsg('', true);
   if (!selectedFile) { setMsg('请先选择要打印的文件', false); return; }
-  const form = new FormData();
-  form.append('file', selectedFile);
-  form.append('copies', $('opt-copies').value);
-  form.append('pages', buildPages());
-  form.append('color', $('opt-color').value);
-  form.append('paperSize', $('opt-paper').value);
-  form.append('printer', $('opt-printer').value);
 
   const btn = $('submit-btn');
   btn.disabled = true;
   try {
+    let file = selectedFile;
+    let pages = buildPages();
+    // 图片在客户端转成单页 PDF 再上传：打印主机用 Office/WPS 转图片不稳定，
+    // 转成 PDF 后服务端只需处理 PDF，链路更可靠。
+    if (window.WebPrintPdf && WebPrintPdf.isImageFile(file)) {
+      setMsg('正在将图片转换为 PDF…', true);
+      file = await WebPrintPdf.imageFileToPdf(file, { paperSize: $('opt-paper').value });
+      pages = ''; // 转换后为单页，忽略页码
+    }
+
+    const form = new FormData();
+    form.append('file', file);
+    form.append('copies', $('opt-copies').value);
+    form.append('pages', pages);
+    form.append('color', $('opt-color').value);
+    form.append('paperSize', $('opt-paper').value);
+    form.append('printer', $('opt-printer').value);
+
     const data = await api('/api/print', { method: 'POST', body: form });
     renderQuota(data.quota);
     setMsg('已提交，正在排队打印', true);

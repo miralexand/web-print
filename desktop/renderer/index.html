@@ -90,7 +90,7 @@
               <div class="stat-value">{{ tunnel.quick.running ? (tunnel.quick.url || (tunnel.quick.starting ? '启动中…' : '运行中')) : '未启动' }}</div>
               <div class="stat-desc">临时公网地址（*.trycloudflare.com），随机且可能失效</div>
               <div class="stat-actions">
-                <el-button v-if="!tunnel.quick.running" type="primary" size="small" @click="startQuickTunnel" :loading="busy.tunnel">启动</el-button>
+                <el-button v-if="!tunnel.quick.running" type="primary" size="small" @click="startQuickTunnel" :disabled="tunnel.token.running" :loading="busy.tunnel">启动</el-button>
                 <template v-else>
                   <el-button size="small" @click="stopQuickTunnel" :loading="busy.tunnel">停止</el-button>
                   <el-button size="small" @click="restartQuickTunnel" :loading="busy.tunnel">重建</el-button>
@@ -105,7 +105,7 @@
               <div class="stat-value">{{ tunnel.token.url || tunnel.token.publicUrl || (tunnel.token.running ? (tunnel.managedByService ? '运行中（系统服务）' : '运行中') : '未启动') }}</div>
               <div class="stat-desc">固定域名（Token），需在 Cloudflare 创建并配置</div>
               <div class="stat-actions">
-                <el-button v-if="!tunnel.token.running" type="primary" size="small" @click="startNamedTunnel" :loading="busy.tunnel">启动</el-button>
+                <el-button v-if="!tunnel.token.running" type="primary" size="small" @click="startNamedTunnel" :disabled="tunnel.quick.running" :loading="busy.tunnel">启动</el-button>
                 <el-button v-else size="small" @click="stopNamedTunnel" :loading="busy.tunnel">停止</el-button>
                 <el-button size="small" :disabled="!(tunnel.token.url || tunnel.token.publicUrl)" @click="copyText(tunnel.token.url || tunnel.token.publicUrl)">复制</el-button>
                 <el-button size="small" :disabled="!(tunnel.token.url || tunnel.token.publicUrl)" @click="openExternal(tunnel.token.url || tunnel.token.publicUrl)">打开</el-button>
@@ -143,7 +143,7 @@
         <!-- 隧道 -->
         <section v-show="tab === 'tunnel'">
           <h1 class="page-title">Cloudflare 隧道</h1>
-          <p class="page-sub">快速隧道与命名隧道可同时运行</p>
+          <p class="page-sub">快速隧道与命名隧道互斥，同一时间只能开启一个</p>
 
           <div v-if="cloudflaredMissing" class="notice info">
             <span>未找到 cloudflared，可一键下载（官方源不可用时自动切换镜像）。</span>
@@ -166,7 +166,7 @@
               </el-form-item>
               <el-form-item label="随程序启动"><el-switch v-model="quickForm.autoStart" /></el-form-item>
               <el-form-item>
-                <el-button type="success" @click="oneClickPublic" :loading="busy.tunnel">一键下载并开启</el-button>
+                <el-button type="success" @click="oneClickPublic" :disabled="tunnel.token.running" :loading="busy.tunnel">一键下载并开启</el-button>
                 <el-button type="primary" @click="saveQuickConfig(true)" :loading="busy.tunnel">保存并启动</el-button>
                 <el-button @click="saveQuickConfig(false)" :loading="busy.tunnel">保存配置</el-button>
                 <el-button @click="restartQuickTunnel" :disabled="!tunnel.quick.running" :loading="busy.tunnel">刷新重建</el-button>

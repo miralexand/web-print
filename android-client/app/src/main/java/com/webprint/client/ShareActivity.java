@@ -36,6 +36,8 @@ import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -124,6 +126,7 @@ public class ShareActivity extends Activity {
     private TextView mServerUrlView;
     private Spinner mServerSpinner;
     private EditText mCopiesInput;
+    private RadioGroup mOrientationGroup;
     private Button mPrintButton;
     private Button mCancelButton;
     private ProgressBar mProgress;
@@ -408,6 +411,36 @@ public class ShareActivity extends Activity {
         mCopiesInput.setSelection(mCopiesInput.getText().length());
         mFormPanel.addView(mCopiesInput, matchWidth());
 
+        // 方向：纵向 / 横向（横向适合横拍照片、横向文档，可获得更大的打印效果）
+        mFormPanel.addView(Ui.fieldLabel(this, getString(R.string.share_orientation_label)));
+        mOrientationGroup = new RadioGroup(this);
+        mOrientationGroup.setId(R.id.share_orientation_group);
+        mOrientationGroup.setOrientation(RadioGroup.HORIZONTAL);
+
+        RadioButton portrait = new RadioButton(this);
+        portrait.setId(R.id.share_orientation_portrait);
+        portrait.setText(getString(R.string.share_orientation_portrait));
+        portrait.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        portrait.setTextColor(Ui.TEXT);
+        mOrientationGroup.addView(portrait);
+
+        RadioButton landscape = new RadioButton(this);
+        landscape.setId(R.id.share_orientation_landscape);
+        landscape.setText(getString(R.string.share_orientation_landscape));
+        landscape.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        landscape.setTextColor(Ui.TEXT);
+        mOrientationGroup.addView(landscape);
+
+        mOrientationGroup.check(R.id.share_orientation_portrait);
+        mFormPanel.addView(mOrientationGroup, matchWidth());
+
+        TextView orientationHint = new TextView(this);
+        orientationHint.setText(getString(R.string.share_orientation_hint));
+        orientationHint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        orientationHint.setTextColor(Ui.TEXT_FAINT);
+        orientationHint.setPadding(0, dp(2), 0, 0);
+        mFormPanel.addView(orientationHint, matchWidth());
+
         content.addView(mFormPanel, Ui.cardParams(this));
 
         // ---- 结果区 ----
@@ -484,6 +517,17 @@ public class ShareActivity extends Activity {
     private LinearLayout.LayoutParams matchWidth() {
         return new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+    }
+
+    /** 上传过程中禁用/恢复方向选择（RadioGroup 不会自动级联到子项）。 */
+    private void setOrientationEnabled(boolean enabled) {
+        if (mOrientationGroup == null) {
+            return;
+        }
+        mOrientationGroup.setEnabled(enabled);
+        for (int i = 0; i < mOrientationGroup.getChildCount(); i++) {
+            mOrientationGroup.getChildAt(i).setEnabled(enabled);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -1258,17 +1302,23 @@ public class ShareActivity extends Activity {
             return;
         }
 
-        beginUpload(base, copies, pages, queue, problems);
+        // 打印方向：纵向 / 横向（工作线程不能访问控件，这里先取好）
+        String orientation = (mOrientationGroup != null
+                && mOrientationGroup.getCheckedRadioButtonId() == R.id.share_orientation_landscape)
+                ? "landscape" : "portrait";
+
+        beginUpload(base, copies, pages, orientation, queue, problems);
     }
 
     private void beginUpload(final String baseUrl, final int copies, final String pages,
-            final List<Item> queue, final List<String> problems) {
+            final String orientation, final List<Item> queue, final List<String> problems) {
         mUploading = true;
         mPrintButton.setEnabled(false);
         mCopiesInput.setEnabled(false);
         mServerSpinner.setEnabled(false);
         mPageFromInput.setEnabled(false);
         mPageToInput.setEnabled(false);
+        setOrientationEnabled(false);
         mProgress.setVisibility(View.VISIBLE);
         mResultView.setTextColor(0xFF616161);
         mResultView.setText(mTextMode
@@ -1302,7 +1352,7 @@ public class ShareActivity extends Activity {
                                             + "\n" + name);
                                 }
                             });
-                            result.add(submitFile(baseUrl, cookie, copies, pages, item));
+                            result.add(submitFile(baseUrl, cookie, copies, pages, orientation, item));
                         }
                     }
                 } catch (Throwable t) {
@@ -1334,6 +1384,7 @@ public class ShareActivity extends Activity {
         mServerSpinner.setEnabled(true);
         mPageFromInput.setEnabled(true);
         mPageToInput.setEnabled(true);
+        setOrientationEnabled(true);
 
         int failures = result.failures();
         String quota = quotaSuffix(result.lastQuota);
@@ -1463,13 +1514,13 @@ public class ShareActivity extends Activity {
      * 图片 → 单页 PDF：用系统 {@link PdfDocument} 把图片按比例居中画到 A4 页面。
      * 返回一个新的 {@link Item}，除文件名/扩展名/MIME 改为 PDF 外，其余沿用原条目。
      */
-    private Item toPdfItem(Item item) throws IOException {
+    private Item toPdfItem(Item item, String orientation) throws IOException {
         Bitmap bitmap = decodeScaledBitmap(item.bytes, MAX_IMAGE_SIDE);
         if (bitmap == null) {
             throw new IOException("decode failed");
         }
         try {
-            byte[] pdf = imageToPdf(bitmap);
+            byte[] pdf = imageToPdf(bitmap, orientation);
             Item out = new Item();
             out.uri = item.uri;
             out.name = replaceExtension(item.name, ".pdf");
@@ -1504,24 +1555,27 @@ public class ShareActivity extends Activity {
         return BitmapFactory.decodeByteArray(data, 0, data.length, options);
     }
 
-    /** 把一张位图按比例居中绘制到 A4 单页 PDF，返回 PDF 字节。 */
-    private static byte[] imageToPdf(Bitmap bitmap) throws IOException {
+    /** 把一张位图按比例居中绘制到 A4 单页 PDF（可横/竖），返回 PDF 字节。 */
+    private static byte[] imageToPdf(Bitmap bitmap, String orientation) throws IOException {
+        boolean landscape = "landscape".equals(orientation);
+        int pageWidth = landscape ? PDF_PAGE_HEIGHT : PDF_PAGE_WIDTH;
+        int pageHeight = landscape ? PDF_PAGE_WIDTH : PDF_PAGE_HEIGHT;
         PdfDocument document = new PdfDocument();
         try {
             PdfDocument.PageInfo info = new PdfDocument.PageInfo.Builder(
-                    PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT, 1).create();
+                    pageWidth, pageHeight, 1).create();
             PdfDocument.Page page = document.startPage(info);
             Canvas canvas = page.getCanvas();
             canvas.drawColor(Color.WHITE);
 
-            float availableWidth = PDF_PAGE_WIDTH - PDF_PAGE_MARGIN * 2f;
-            float availableHeight = PDF_PAGE_HEIGHT - PDF_PAGE_MARGIN * 2f;
+            float availableWidth = pageWidth - PDF_PAGE_MARGIN * 2f;
+            float availableHeight = pageHeight - PDF_PAGE_MARGIN * 2f;
             float scale = Math.min(availableWidth / bitmap.getWidth(),
                     availableHeight / bitmap.getHeight());
             float drawWidth = bitmap.getWidth() * scale;
             float drawHeight = bitmap.getHeight() * scale;
-            float left = (PDF_PAGE_WIDTH - drawWidth) / 2f;
-            float top = (PDF_PAGE_HEIGHT - drawHeight) / 2f;
+            float left = (pageWidth - drawWidth) / 2f;
+            float top = (pageHeight - drawHeight) / 2f;
             RectF dst = new RectF(left, top, left + drawWidth, top + drawHeight);
             Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
             canvas.drawBitmap(bitmap, null, dst, paint);
@@ -1548,13 +1602,14 @@ public class ShareActivity extends Activity {
         return base + newExtension;
     }
 
-    private Result submitFile(String baseUrl, String cookie, int copies, String pages, Item item) {
+    private Result submitFile(String baseUrl, String cookie, int copies, String pages,
+            String orientation, Item item) {
         Item upload = item;
         // 图片在客户端转成单页 PDF 再上传：打印主机用 Office/WPS 转图片不稳定，
-        // 转成 PDF 后服务端只需处理 PDF，链路更可靠。
+        // 转成 PDF 后服务端只需处理 PDF，链路更可靠。方向决定 PDF 页面是横版还是竖版。
         if (isImageItem(item)) {
             try {
-                upload = toPdfItem(item);
+                upload = toPdfItem(item, orientation);
             } catch (Throwable t) {
                 String message = TextUtils.isEmpty(t.getMessage())
                         ? t.getClass().getSimpleName() : t.getMessage();
@@ -1563,7 +1618,7 @@ public class ShareActivity extends Activity {
         }
         HttpURLConnection conn = null;
         try {
-            MultipartBody body = buildMultipart(upload, copies, pages);
+            MultipartBody body = buildMultipart(upload, copies, pages, orientation);
             URL url = new URL(baseUrl + "/api/print");
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
@@ -1738,18 +1793,20 @@ public class ShareActivity extends Activity {
      *
      * <p>字段名与服务端 {@code upload.single('file')} 严格对应：
      * {@code file} / {@code copies} / {@code pages}（空串 = 全部页）/
-     * {@code color}（固定 mono）/ {@code paperSize}（固定 A4）/ {@code printer}（空 = 默认打印机）。
+     * {@code color}（固定 mono）/ {@code paperSize}（固定 A4）/
+     * {@code orientation}（portrait / landscape）/ {@code printer}（空 = 默认打印机）。
      * 文件部分不带 {@code Content-Type}，由服务端按扩展名与文件头校验。
      *
      * <p>先算出总长度再一次性写出，目的是能给出准确的 {@code Content-Length}
      * （服务端 multer 也能据此拒绝超大请求）。
      */
-    private MultipartBody buildMultipart(Item item, int copies, String pages) {
+    private MultipartBody buildMultipart(Item item, int copies, String pages, String orientation) {
         String boundary = "----WebPrintAndroid"
                 + Long.toHexString(System.currentTimeMillis())
                 + Long.toHexString(Double.doubleToLongBits(Math.random()));
         Charset utf8 = Charset.forName("UTF-8");
         String pageValue = pages == null ? "" : pages;
+        String orientationValue = "landscape".equals(orientation) ? "landscape" : "portrait";
 
         ByteArrayOutputStream head = new ByteArrayOutputStream();
         try {
@@ -1758,6 +1815,7 @@ public class ShareActivity extends Activity {
                     {"pages", pageValue},
                     {"color", "mono"},
                     {"paperSize", "A4"},
+                    {"orientation", orientationValue},
                     {"printer", ""}}) {
                 head.write(("--" + boundary + "\r\n").getBytes(utf8));
                 head.write(("Content-Disposition: form-data; name=\"" + field[0] + "\"\r\n\r\n")

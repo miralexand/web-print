@@ -218,7 +218,10 @@ $('print-form').addEventListener('submit', async (e) => {
     // 转成 PDF 后服务端只需处理 PDF，链路更可靠。
     if (window.WebPrintPdf && WebPrintPdf.isImageFile(file)) {
       setMsg('正在将图片转换为 PDF…', true);
-      file = await WebPrintPdf.imageFileToPdf(file, { paperSize: $('opt-paper').value });
+      file = await WebPrintPdf.imageFileToPdf(file, {
+        paperSize: $('opt-paper').value,
+        orientation: $('opt-orientation').value,
+      });
       pages = ''; // 转换后为单页，忽略页码
     }
 
@@ -228,6 +231,7 @@ $('print-form').addEventListener('submit', async (e) => {
     form.append('pages', pages);
     form.append('color', $('opt-color').value);
     form.append('paperSize', $('opt-paper').value);
+    form.append('orientation', $('opt-orientation').value);
     form.append('printer', $('opt-printer').value);
 
     const data = await api('/api/print', { method: 'POST', body: form });
@@ -315,7 +319,7 @@ function renderTasks(tasks) {
       : `<button class="btn ghost" data-delete="${t.id}">删除</button>`;
     tr.innerHTML = `
       <td><div class="filename" title="${escapeHtml(t.originalName)}">${escapeHtml(t.originalName)}</div></td>
-      <td class="params">${t.copies} 份 · ${pagesText}${t.color === 'color' ? '彩色' : '黑白'} · ${escapeHtml(t.paperSize)}</td>
+      <td class="params">${t.copies} 份 · ${pagesText}${t.color === 'color' ? '彩色' : '黑白'} · ${escapeHtml(t.paperSize)} · ${t.orientation === 'landscape' ? '横向' : '纵向'}</td>
       <td class="params">${escapeHtml(t.ownerName || '-')}</td>
       <td><span class="status ${t.status}">${STATUS_TEXT[t.status] || t.status}</span>${errorHint}</td>
       <td class="params">${formatTime(t.createdAt)}</td>

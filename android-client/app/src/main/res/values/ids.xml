@@ -18,4 +18,7 @@
     <item name="share_page_from_input" type="id" />
     <item name="share_page_to_input" type="id" />
     <item name="share_pages_all_button" type="id" />
+    <item name="share_orientation_group" type="id" />
+    <item name="share_orientation_portrait" type="id" />
+    <item name="share_orientation_landscape" type="id" />
 </resources>

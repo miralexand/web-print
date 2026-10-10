@@ -94,6 +94,7 @@ function enqueueTask(input) {
     pages: normalizePages(fields.pages),
     color: fields.color === 'color' ? 'color' : 'mono',
     paperSize: PAPER_SIZES.has(fields.paperSize) ? fields.paperSize : 'A4',
+    orientation: fields.orientation === 'landscape' ? 'landscape' : 'portrait',
     printer: (fields.printer || '').toString().trim().slice(0, 120),
     ownerType: owner.type,
     ownerId: owner.id,

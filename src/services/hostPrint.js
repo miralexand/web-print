@@ -40,6 +40,7 @@ async function submit(task) {
   form.append('pages', task.pages || '');
   form.append('color', task.color);
   form.append('paperSize', task.paperSize || '');
+  form.append('orientation', task.orientation === 'landscape' ? 'landscape' : 'portrait');
   form.append('printer', task.printer || '');
   form.append('jobId', task.id);
 

@@ -164,7 +164,7 @@
   /**
    * 把图片 File 转换为单页 PDF File。
    * @param {File} file
-   * @param {{paperSize?:string, quality?:number, maxSide?:number, margin?:number}} [options]
+   * @param {{paperSize?:string, orientation?:'portrait'|'landscape', quality?:number, maxSide?:number, margin?:number}} [options]
    * @returns {Promise<File>}
    */
   async function imageFileToPdf(file, options) {
@@ -189,8 +189,12 @@
       const jpegBlob = await canvasToBlob(canvas, 'image/jpeg', opts.quality || 0.92);
       const jpeg = new Uint8Array(await jpegBlob.arrayBuffer());
 
-      const page = PAPER_SIZES[opts.paperSize] || PAPER_SIZES.A4;
-      const bytes = buildImagePdf(jpeg, canvas.width, canvas.height, page[0], page[1], opts.margin);
+      // 纸张尺寸：横向时宽高互换，让图片在横向纸上铺得更满
+      const dims = PAPER_SIZES[opts.paperSize] || PAPER_SIZES.A4;
+      const landscape = opts.orientation === 'landscape';
+      const pageW = landscape ? dims[1] : dims[0];
+      const pageH = landscape ? dims[0] : dims[1];
+      const bytes = buildImagePdf(jpeg, canvas.width, canvas.height, pageW, pageH, opts.margin);
       const base = String(file.name || '图片').replace(/\.[^.]+$/, '');
       return new File([bytes], `${base}.pdf`, { type: 'application/pdf' });
     } finally {

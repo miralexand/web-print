@@ -148,6 +148,10 @@
     <string name="share_page_to_sep">至</string>
     <string name="share_pages_all">全部</string>
     <string name="share_pages_selected">已选第 %1$s 页</string>
+    <string name="share_orientation_label">方向</string>
+    <string name="share_orientation_portrait">纵向</string>
+    <string name="share_orientation_landscape">横向</string>
+    <string name="share_orientation_hint">横向适合横拍的照片或横向文档，可获得更大打印效果</string>
     <string name="share_err_pages_range">页码超出范围（共 %1$d 页）</string>
     <string name="share_err_pages_format">页码填写有误，请输入 1-%1$d 之间的数字</string>
 

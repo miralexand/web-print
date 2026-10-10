@@ -235,6 +235,7 @@ class PrintService {
       const pages = normalizePages(req.body.pages);
       const color = req.body.color === 'color' ? 'color' : 'mono';
       const paperSize = (req.body.paperSize || '').trim();
+      const orientation = req.body.orientation === 'landscape' ? 'landscape' : 'portrait';
       const printer = (req.body.printer || '').trim();
       const jobId = (req.body.jobId || '').trim();
       try {
@@ -243,7 +244,7 @@ class PrintService {
           convertedPath = await this.convertToPdf(uploadedPath);
           pdfPath = convertedPath;
         }
-        const options = { copies };
+        const options = { copies, orientation };
         if (pages) options.pages = pages;
         if (printer) options.printer = printer;
         if (color === 'mono') options.monochrome = true;

@@ -41,6 +41,8 @@ async function submit(task) {
   form.append('color', task.color);
   form.append('paperSize', task.paperSize || '');
   form.append('orientation', task.orientation === 'landscape' ? 'landscape' : 'portrait');
+  form.append('side', task.side || 'simplex');
+  form.append('subset', task.subset || '');
   form.append('printer', task.printer || '');
   form.append('jobId', task.id);
 

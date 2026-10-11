@@ -106,7 +106,26 @@
                 <option value="landscape">横向</option>
               </select>
             </label>
+            <label>双面
+              <select id="opt-side">
+                <option value="simplex">单面</option>
+                <option value="duplexlong">自动双面·长边翻转</option>
+                <option value="duplexshort">自动双面·短边翻转</option>
+                <option value="manual">手动双面（先奇数页）</option>
+              </select>
+            </label>
             <label>打印机<select id="opt-printer"><option value="">默认打印机</option></select></label>
+          </div>
+
+          <div id="manual-duplex" class="manual-duplex hidden">
+            <div class="manual-duplex-text">
+              <strong>手动双面 · 第 2 步</strong>
+              <span>奇数页已提交。请等纸张打印完，取回后<strong>原位翻面放回</strong>，再点右侧按钮打印偶数页。</span>
+            </div>
+            <div class="manual-duplex-actions">
+              <button type="button" id="manual-even-btn" class="btn primary">继续打印偶数页</button>
+              <button type="button" id="manual-cancel-btn" class="btn ghost">取消</button>
+            </div>
           </div>
 
           <div class="submit-row">

@@ -20,10 +20,42 @@ const upload = multer({
 });
 
 const PAPER_SIZES = new Set(['A3', 'A4', 'A5', 'B5', 'Letter', 'Legal']);
+// 双面：simplex 单面 / duplexlong 双面长边 / duplexshort 双面短边
+const SIDES = new Set(['simplex', 'duplexlong', 'duplexshort']);
+// 手动双面用的奇偶子集
+const SUBSETS = new Set(['odd', 'even']);
 
 // 文本打印：上限 100KB（约 3 万字），避免一次提交超长内容阻塞队列
 const MAX_TEXT_BYTES = 100 * 1024;
 const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
+
+// 手动双面：奇数页（第 1 步）提交后发一个一次性令牌，偶数页（第 2 步）凭令牌
+// 免除再次扣配额，使「奇数页 + 偶数页」整体只算一次打印。
+const DUPLEX_TOKEN_TTL_MS = 30 * 60 * 1000; // 30 分钟
+const duplexTokens = new Map(); // token -> { key, expiresAt }
+
+function purgeExpiredDuplexTokens() {
+  const now = Date.now();
+  for (const [token, entry] of duplexTokens) {
+    if (entry.expiresAt <= now) duplexTokens.delete(token);
+  }
+}
+
+function issueDuplexToken(key) {
+  purgeExpiredDuplexTokens();
+  const token = crypto.randomBytes(24).toString('hex');
+  duplexTokens.set(token, { key, expiresAt: Date.now() + DUPLEX_TOKEN_TTL_MS });
+  return token;
+}
+
+/** 校验并消费令牌；仅同一身份、未过期、未使用过的令牌有效 */
+function consumeDuplexToken(token, key) {
+  const entry = duplexTokens.get(token);
+  if (!entry) return false;
+  duplexTokens.delete(token);
+  if (entry.expiresAt <= Date.now() || entry.key !== key) return false;
+  return true;
+}
 
 /** 修复 multipart 文件名乱码（busboy 默认 latin1 解析） */
 function decodeFilename(name) {
@@ -95,6 +127,8 @@ function enqueueTask(input) {
     color: fields.color === 'color' ? 'color' : 'mono',
     paperSize: PAPER_SIZES.has(fields.paperSize) ? fields.paperSize : 'A4',
     orientation: fields.orientation === 'landscape' ? 'landscape' : 'portrait',
+    side: SIDES.has(fields.side) ? fields.side : 'simplex',
+    subset: SUBSETS.has(fields.subset) ? fields.subset : '',
     printer: (fields.printer || '').toString().trim().slice(0, 120),
     ownerType: owner.type,
     ownerId: owner.id,
@@ -123,20 +157,37 @@ router.post('/print', upload.single('file'), (req, res) => {
     return res.status(400).json({ error: result.error });
   }
 
-  const taken = takeQuota(req, res);
-  if (!taken) return undefined;
+  const fields = req.body || {};
+  const subset = SUBSETS.has(fields.subset) ? fields.subset : '';
+  const manualDuplex = fields.duplexManual === '1' || fields.duplexManual === 'true';
+  const quotaIdentity = identity.quotaIdentity(req);
+
+  // 手动双面第 2 步（偶数页）凭第 1 步发的令牌，免除再次扣配额
+  let charge = true;
+  if (subset === 'even' && typeof fields.duplexToken === 'string' && fields.duplexToken) {
+    charge = !consumeDuplexToken(fields.duplexToken, quotaIdentity.key);
+  }
+
+  let taken = null;
+  if (charge) {
+    taken = takeQuota(req, res);
+    if (!taken) return undefined;
+  }
 
   const task = enqueueTask({
     buffer: req.file.buffer,
     originalName: req.file.originalname,
     ext: result.ext,
     kind: result.kind,
-    fields: req.body,
-    quota: taken.quota,
-    consumed: taken.consumed,
+    fields,
+    quota: taken ? taken.quota : quotaIdentity,
+    consumed: taken ? taken.consumed : {},
   });
 
-  return res.status(201).json({ task: queue.publicTask(task), quota: currentQuota(req) });
+  // 手动双面第 1 步（奇数页）：发一个一次性令牌，第 2 步凭它免扣配额
+  const duplexToken = (manualDuplex && subset === 'odd') ? issueDuplexToken(quotaIdentity.key) : '';
+
+  return res.status(201).json({ task: queue.publicTask(task), quota: currentQuota(req), duplexToken });
 });
 
 /**

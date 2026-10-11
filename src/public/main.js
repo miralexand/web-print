@@ -3,6 +3,7 @@
 const $ = (id) => document.getElementById(id);
 let selectedFile = null;
 let previewUrl = null;
+let previewToken = 0;
 let currentUser = null;
 let refreshTimer = null;
 let editingUserId = null;
@@ -129,13 +130,17 @@ dropzone.addEventListener('drop', (e) => {
 fileInput.addEventListener('change', () => { if (fileInput.files.length) setFile(fileInput.files[0]); });
 $('clear-file-btn').addEventListener('click', () => clearFile(false));
 
+// 纸张 / 方向变化时重绘图片的「打印效果」预览（PDF 内容不变，无需刷新）
+$('opt-paper').addEventListener('change', () => { if (isImageSelected()) refreshPreview(); });
+$('opt-orientation').addEventListener('change', () => { if (isImageSelected()) refreshPreview(); });
+
 function setFile(file) {
   const maxMb = 20;
   if (file.size > maxMb * 1024 * 1024) { setMsg(`文件超过 ${maxMb}MB 限制`, false); return; }
   clearFile(true);
   selectedFile = file;
   $('file-label').textContent = `${file.name}（${(file.size / 1024).toFixed(0)} KB）`;
-  showPreview(file);
+  refreshPreview();
   // 图片会在提交时自动转为单页 PDF，页码无意义，禁用以免误填
   const isImage = !!(window.WebPrintPdf && WebPrintPdf.isImageFile(file));
   $('opt-page-from').disabled = isImage;
@@ -147,31 +152,76 @@ function setFile(file) {
   setMsg(isImage ? '图片将在本机自动转换为 PDF 后上传' : '', true);
 }
 
-function showPreview(file) {
+function isImageSelected() {
+  return !!(selectedFile && window.WebPrintPdf && WebPrintPdf.isImageFile(selectedFile));
+}
+
+/** 当前选择的打印方向 */
+function currentOrientation() {
+  return $('opt-orientation').value === 'landscape' ? 'landscape' : 'portrait';
+}
+
+function hidePreviewFrames() {
+  $('preview-img').classList.add('hidden');
+  $('preview-pdf').classList.add('hidden');
+  $('preview-generic').classList.add('hidden');
+}
+
+/**
+ * 刷新预览：
+ *  - 图片：按当前纸张 / 方向渲染「转成 PDF 后的最终打印形态」（canvas 页面预览）；
+ *  - PDF：直接内嵌预览原始文件；
+ *  - Office / 文本：无法在浏览器预览，提示提交后由打印主机转换。
+ */
+async function refreshPreview() {
+  const file = selectedFile;
+  if (!file) return;
   const img = $('preview-img');
   const pdf = $('preview-pdf');
   const generic = $('preview-generic');
-  img.classList.add('hidden');
-  pdf.classList.add('hidden');
-  generic.classList.add('hidden');
+  const token = ++previewToken;
+
+  if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
+  hidePreviewFrames();
+  $('preview-name').textContent = file.name;
+  $('preview-size').textContent = `${(file.size / 1024).toFixed(0)} KB`;
+  $('file-preview').classList.remove('hidden');
+
   const type = (file.type || '').toLowerCase();
   const name = (file.name || '').toLowerCase();
-  previewUrl = URL.createObjectURL(file);
-  if (type.startsWith('image/') || /\.(png|jpe?g)$/.test(name)) {
-    img.src = previewUrl;
-    img.classList.remove('hidden');
-  } else if (type === 'application/pdf' || name.endsWith('.pdf')) {
+
+  if (isImageSelected()) {
+    $('preview-size').textContent = '正在生成预览…';
+    try {
+      const dataUrl = await WebPrintPdf.imagePagePreview(file, {
+        paperSize: $('opt-paper').value,
+        orientation: currentOrientation(),
+      });
+      if (token !== previewToken || selectedFile !== file) return;
+      img.src = dataUrl;
+      img.classList.remove('hidden');
+      const dir = currentOrientation() === 'landscape' ? '横向' : '纵向';
+      $('preview-size').textContent = `${(file.size / 1024).toFixed(0)} KB · 已按${dir}预览打印效果`;
+    } catch (_) {
+      if (token !== previewToken) return;
+      generic.classList.remove('hidden');
+      $('preview-size').textContent = `${(file.size / 1024).toFixed(0)} KB`;
+    }
+    return;
+  }
+
+  if (type === 'application/pdf' || name.endsWith('.pdf')) {
+    previewUrl = URL.createObjectURL(file);
     pdf.src = previewUrl;
     pdf.classList.remove('hidden');
   } else {
     generic.classList.remove('hidden');
   }
-  $('preview-name').textContent = file.name;
-  $('preview-size').textContent = `${(file.size / 1024).toFixed(0)} KB`;
-  $('file-preview').classList.remove('hidden');
 }
 
 function clearFile(silent) {
+  if (manualDuplex) exitManualDuplex();
+  previewToken++;
   if (previewUrl) {
     URL.revokeObjectURL(previewUrl);
     previewUrl = null;
@@ -181,8 +231,8 @@ function clearFile(silent) {
   $('file-label').textContent = '点击或拖拽文件到此处';
   const preview = $('file-preview');
   if (preview) preview.classList.add('hidden');
-  $('preview-img').src = '';
-  $('preview-pdf').src = '';
+  $('preview-img').removeAttribute('src');
+  $('preview-pdf').removeAttribute('src');
   $('opt-page-from').disabled = false;
   $('opt-page-to').disabled = false;
   if (!silent) setMsg('已移除，请重新选择文件', true);
@@ -204,6 +254,66 @@ function buildPages() {
 }
 
 // ---------------- 提交打印 ----------------
+// 手动双面：第 1 步（奇数页）提交后，保留文件与参数，等用户翻面再提交第 2 步（偶数页）
+let manualDuplex = null; // { file, fields }
+
+/** 准备实际上传的文件：图片在客户端转成单页 PDF，并返回页码 */
+async function prepareUploadFile() {
+  let file = selectedFile;
+  let pages = buildPages();
+  if (window.WebPrintPdf && WebPrintPdf.isImageFile(file)) {
+    file = await WebPrintPdf.imageFileToPdf(file, {
+      paperSize: $('opt-paper').value,
+      orientation: $('opt-orientation').value,
+    });
+    pages = ''; // 转换后为单页，忽略页码
+  }
+  return { file, pages };
+}
+
+/** 取当前表单参数（第 2 步复用第 1 步的快照，避免中途改动导致不一致） */
+function currentPrintFields(pages) {
+  return {
+    copies: $('opt-copies').value,
+    pages,
+    color: $('opt-color').value,
+    paperSize: $('opt-paper').value,
+    orientation: $('opt-orientation').value,
+    printer: $('opt-printer').value,
+  };
+}
+
+/** 按准备好的文件与参数提交一次打印（side：单面/双面；subset：手动双面的奇/偶） */
+function submitPrint(file, fields, side, subset, duplexToken, duplexManual) {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('copies', fields.copies);
+  form.append('pages', fields.pages);
+  form.append('color', fields.color);
+  form.append('paperSize', fields.paperSize);
+  form.append('orientation', fields.orientation);
+  form.append('side', side);
+  if (subset) form.append('subset', subset);
+  // 手动双面：第 1 步声明 duplexManual 以换取令牌，第 2 步带上令牌免再扣配额
+  if (duplexManual) form.append('duplexManual', '1');
+  if (duplexToken) form.append('duplexToken', duplexToken);
+  form.append('printer', fields.printer);
+  return api('/api/print', { method: 'POST', body: form });
+}
+
+function enterManualDuplex() {
+  $('manual-duplex').classList.remove('hidden');
+  $('manual-even-btn').disabled = false;
+  $('submit-btn').disabled = true;
+  setMsg('已提交奇数页，请取出纸张原位翻面后放回，再点「继续打印偶数页」', true);
+}
+
+function exitManualDuplex() {
+  manualDuplex = null;
+  $('manual-duplex').classList.add('hidden');
+  $('submit-btn').disabled = false;
+}
+
 $('print-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   setMsg('', true);
@@ -211,32 +321,43 @@ $('print-form').addEventListener('submit', async (e) => {
 
   const btn = $('submit-btn');
   btn.disabled = true;
+  const side = $('opt-side').value;
   try {
-    let file = selectedFile;
-    let pages = buildPages();
-    // 图片在客户端转成单页 PDF 再上传：打印主机用 Office/WPS 转图片不稳定，
-    // 转成 PDF 后服务端只需处理 PDF，链路更可靠。
-    if (window.WebPrintPdf && WebPrintPdf.isImageFile(file)) {
-      setMsg('正在将图片转换为 PDF…', true);
-      file = await WebPrintPdf.imageFileToPdf(file, {
-        paperSize: $('opt-paper').value,
-        orientation: $('opt-orientation').value,
-      });
-      pages = ''; // 转换后为单页，忽略页码
+    if (isImageSelected()) setMsg('正在将图片转换为 PDF…', true);
+    const { file, pages } = await prepareUploadFile();
+    const fields = currentPrintFields(pages);
+
+    if (side === 'manual') {
+      // 手动双面第 1 步：先打印奇数页（单面），服务端发令牌，第 2 步凭令牌不再扣配额
+      const data = await submitPrint(file, fields, 'simplex', 'odd', '', true);
+      renderQuota(data.quota);
+      manualDuplex = { file, fields, token: data.duplexToken || '' };
+      enterManualDuplex();
+    } else {
+      const data = await submitPrint(file, fields, side, '');
+      renderQuota(data.quota);
+      setMsg('已提交，正在排队打印', true);
+      clearFile(true);
+      refreshTasks();
     }
+  } catch (err) {
+    if (err.data && err.data.quota) renderQuota(err.data.quota);
+    setMsg(err.message, false);
+  } finally {
+    // 进入手动双面第 2 步时保持提交按钮禁用，避免重复打印奇数页
+    if (!manualDuplex) btn.disabled = false;
+  }
+});
 
-    const form = new FormData();
-    form.append('file', file);
-    form.append('copies', $('opt-copies').value);
-    form.append('pages', pages);
-    form.append('color', $('opt-color').value);
-    form.append('paperSize', $('opt-paper').value);
-    form.append('orientation', $('opt-orientation').value);
-    form.append('printer', $('opt-printer').value);
-
-    const data = await api('/api/print', { method: 'POST', body: form });
+$('manual-even-btn').addEventListener('click', async () => {
+  if (!manualDuplex) return;
+  const btn = $('manual-even-btn');
+  btn.disabled = true;
+  try {
+    const data = await submitPrint(manualDuplex.file, manualDuplex.fields, 'simplex', 'even', manualDuplex.token, false);
     renderQuota(data.quota);
-    setMsg('已提交，正在排队打印', true);
+    exitManualDuplex();
+    setMsg('偶数页已提交，手动双面完成', true);
     clearFile(true);
     refreshTasks();
   } catch (err) {
@@ -245,6 +366,14 @@ $('print-form').addEventListener('submit', async (e) => {
   } finally {
     btn.disabled = false;
   }
+});
+
+$('manual-cancel-btn').addEventListener('click', () => {
+  if (!manualDuplex) return;
+  exitManualDuplex();
+  setMsg('已取消手动双面（仅打印了奇数页）', true);
+  clearFile(true);
+  refreshTasks();
 });
 
 function setMsg(text, ok) {

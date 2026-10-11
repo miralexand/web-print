@@ -236,6 +236,9 @@ class PrintService {
       const color = req.body.color === 'color' ? 'color' : 'mono';
       const paperSize = (req.body.paperSize || '').trim();
       const orientation = req.body.orientation === 'landscape' ? 'landscape' : 'portrait';
+      const side = ['simplex', 'duplexlong', 'duplexshort'].indexOf(req.body.side) >= 0
+        ? req.body.side : 'simplex';
+      const subset = (req.body.subset === 'odd' || req.body.subset === 'even') ? req.body.subset : '';
       const printer = (req.body.printer || '').trim();
       const jobId = (req.body.jobId || '').trim();
       try {
@@ -244,8 +247,9 @@ class PrintService {
           convertedPath = await this.convertToPdf(uploadedPath);
           pdfPath = convertedPath;
         }
-        const options = { copies, orientation };
+        const options = { copies, orientation, side };
         if (pages) options.pages = pages;
+        if (subset) options.subset = subset;
         if (printer) options.printer = printer;
         if (color === 'mono') options.monochrome = true;
         if (paperSize) options.paperSize = paperSize;

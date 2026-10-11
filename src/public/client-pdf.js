@@ -202,5 +202,49 @@
     }
   }
 
-  return { imageFileToPdf, buildImagePdf, isImageFile, PAPER_SIZES };
+  /**
+   * 生成「打印效果」预览图（data URL）：把图片按当前纸张、方向与留白，
+   * 画到一张页面比例的白底画布上，让用户在提交前确认最终打印形态。
+   * 纯 canvas 实现，不依赖 PDF 预览器，手机浏览器也能显示。
+   * @param {File} file
+   * @param {{paperSize?:string, orientation?:'portrait'|'landscape', width?:number, margin?:number}} [options]
+   * @returns {Promise<string>}
+   */
+  async function imagePagePreview(file, options) {
+    const opts = options || {};
+    const source = await loadSource(file);
+    try {
+      const iw = source.width;
+      const ih = source.height;
+      if (!iw || !ih) throw new Error('无法读取图片尺寸');
+
+      const dims = PAPER_SIZES[opts.paperSize] || PAPER_SIZES.A4;
+      const landscape = opts.orientation === 'landscape';
+      const pageW = landscape ? dims[1] : dims[0];
+      const pageH = landscape ? dims[0] : dims[1];
+      const margin = opts.margin == null ? DEFAULT_MARGIN : opts.margin;
+
+      const outW = opts.width || 360;
+      const outH = Math.max(1, Math.round((pageH / pageW) * outW));
+      const canvas = document.createElement('canvas');
+      canvas.width = outW;
+      canvas.height = outH;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, outW, outH);
+
+      const m = (margin / pageW) * outW;
+      const availW = outW - m * 2;
+      const availH = outH - m * 2;
+      const fit = Math.min(availW / iw, availH / ih);
+      const dw = iw * fit;
+      const dh = ih * fit;
+      ctx.drawImage(source.draw, (outW - dw) / 2, (outH - dh) / 2, dw, dh);
+      return canvas.toDataURL('image/png');
+    } finally {
+      if (source.cleanup) source.cleanup();
+    }
+  }
+
+  return { imageFileToPdf, imagePagePreview, buildImagePdf, isImageFile, PAPER_SIZES };
 });

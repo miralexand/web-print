@@ -140,6 +140,7 @@
     <string name="share_preview_loading">正在生成预览…</string>
     <string name="share_preview_unavailable">该格式无法预览，提交后将自动转换后打印</string>
     <string name="share_preview_pages">共 %1$d 页</string>
+    <string name="share_preview_final">已按%1$s预览最终打印效果</string>
     <string name="share_preview_more">仅显示前 %1$d 页，更多页可在下方填写页码</string>
     <string name="share_preview_select_hint">点按缩略图可快速选择起始页与结束页</string>
     <string name="share_pages_label">页码（不填为全部）</string>
@@ -152,6 +153,14 @@
     <string name="share_orientation_portrait">纵向</string>
     <string name="share_orientation_landscape">横向</string>
     <string name="share_orientation_hint">横向适合横拍的照片或横向文档，可获得更大打印效果</string>
+    <string name="share_side_label">双面</string>
+    <string name="share_side_simplex">单面</string>
+    <string name="share_side_duplexlong">自动双面·长边翻转</string>
+    <string name="share_side_duplexshort">自动双面·短边翻转</string>
+    <string name="share_side_manual">手动双面（先奇数页）</string>
+    <string name="share_manual_hint">奇数页已提交。请等纸张打印完，取出后原位翻面放回，再点「继续打印偶数页」。</string>
+    <string name="share_manual_continue">继续打印偶数页</string>
+    <string name="share_manual_done">偶数页已提交，手动双面完成</string>
     <string name="share_err_pages_range">页码超出范围（共 %1$d 页）</string>
     <string name="share_err_pages_format">页码填写有误，请输入 1-%1$d 之间的数字</string>
 

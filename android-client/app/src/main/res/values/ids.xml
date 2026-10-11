@@ -21,4 +21,6 @@
     <item name="share_orientation_group" type="id" />
     <item name="share_orientation_portrait" type="id" />
     <item name="share_orientation_landscape" type="id" />
+    <item name="share_side_spinner" type="id" />
+    <item name="share_manual_continue_button" type="id" />
 </resources>

@@ -189,6 +189,24 @@ label.checkbox input { width: auto; }
 }
 .submit-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 
+/* 手动双面第 2 步提示 */
+.manual-duplex {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 4px 0 18px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 159, 10, 0.4);
+  border-radius: 16px;
+  background: #fff7e9;
+}
+.manual-duplex-text { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 220px; }
+.manual-duplex-text strong { font-size: 13.5px; }
+.manual-duplex-text span { color: var(--muted); font-size: 12.5px; line-height: 1.55; }
+.manual-duplex-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
 /* 用户表单 */
 .user-form {
   display: grid;

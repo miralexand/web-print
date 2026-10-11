@@ -127,6 +127,8 @@ public class ShareActivity extends Activity {
     private Spinner mServerSpinner;
     private EditText mCopiesInput;
     private RadioGroup mOrientationGroup;
+    private Spinner mSideSpinner;
+    private Button mManualContinueButton;
     private Button mPrintButton;
     private Button mCancelButton;
     private ProgressBar mProgress;
@@ -163,6 +165,16 @@ public class ShareActivity extends Activity {
     /** 上传线程：单线程串行，保证 ACTION_SEND_MULTIPLE 逐个提交。 */
     private ExecutorService mExecutor;
     private boolean mUploading;
+
+    // 手动双面第 2 步（打印偶数页）需要的快照
+    private boolean mManualDuplex;
+    private List<Item> mManualQueue;
+    private List<String> mManualProblems;
+    private String mManualBaseUrl;
+    private int mManualCopies;
+    private String mManualPages = "";
+    private String mManualOrientation = "portrait";
+    private List<String> mManualTokens;
 
     private List<ServerStore.Server> mServers = new ArrayList<>();
 
@@ -432,6 +444,21 @@ public class ShareActivity extends Activity {
         mOrientationGroup.addView(landscape);
 
         mOrientationGroup.check(R.id.share_orientation_portrait);
+        // 切换方向后重绘图片的「打印效果」预览（PDF 内容不变，无需刷新）
+        mOrientationGroup.setOnCheckedChangeListener(new RadioGroup.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(RadioGroup group, int checkedId) {
+                if (mUploading || mTextMode || mItems.size() != 1) {
+                    return;
+                }
+                Item item = mItems.get(0);
+                String ext = item.extension != null ? item.extension
+                        : resolveExtension(item.name, item.mime);
+                if (isImageExtension(ext)) {
+                    preparePreview();
+                }
+            }
+        });
         mFormPanel.addView(mOrientationGroup, matchWidth());
 
         TextView orientationHint = new TextView(this);
@@ -440,6 +467,21 @@ public class ShareActivity extends Activity {
         orientationHint.setTextColor(Ui.TEXT_FAINT);
         orientationHint.setPadding(0, dp(2), 0, 0);
         mFormPanel.addView(orientationHint, matchWidth());
+
+        // 双面：单面 / 自动双面长边 / 自动双面短边 / 手动双面（先奇数页）
+        mFormPanel.addView(Ui.fieldLabel(this, getString(R.string.share_side_label)));
+        mSideSpinner = new Spinner(this);
+        mSideSpinner.setId(R.id.share_side_spinner);
+        ArrayAdapter<String> sideAdapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, new String[] {
+                        getString(R.string.share_side_simplex),
+                        getString(R.string.share_side_duplexlong),
+                        getString(R.string.share_side_duplexshort),
+                        getString(R.string.share_side_manual),
+                });
+        sideAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        mSideSpinner.setAdapter(sideAdapter);
+        mFormPanel.addView(mSideSpinner, matchWidth());
 
         content.addView(mFormPanel, Ui.cardParams(this));
 
@@ -485,6 +527,21 @@ public class ShareActivity extends Activity {
         });
         buttons.addView(mCancelButton);
 
+        // 手动双面第 2 步：仅在奇数页成功提交后出现
+        mManualContinueButton = Ui.primaryButton(this, getString(R.string.share_manual_continue));
+        mManualContinueButton.setId(R.id.share_manual_continue_button);
+        mManualContinueButton.setVisibility(View.GONE);
+        mManualContinueButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                onManualContinue();
+            }
+        });
+        LinearLayout.LayoutParams continueLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        continueLp.leftMargin = dp(12);
+        buttons.addView(mManualContinueButton, continueLp);
+
         mPrintButton = Ui.primaryButton(this, getString(R.string.share_print));
         mPrintButton.setId(R.id.share_print_button);
         mPrintButton.setOnClickListener(new View.OnClickListener() {
@@ -517,6 +574,23 @@ public class ShareActivity extends Activity {
     private LinearLayout.LayoutParams matchWidth() {
         return new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+    }
+
+    /** 当前选择的打印方向：{@code landscape} 或 {@code portrait}。 */
+    private String currentOrientation() {
+        return (mOrientationGroup != null
+                && mOrientationGroup.getCheckedRadioButtonId() == R.id.share_orientation_landscape)
+                ? "landscape" : "portrait";
+    }
+
+    /** 当前选择的双面模式：simplex / duplexlong / duplexshort / manual。 */
+    private String currentSide() {
+        if (mSideSpinner == null) {
+            return "simplex";
+        }
+        String[] values = {"simplex", "duplexlong", "duplexshort", "manual"};
+        int pos = mSideSpinner.getSelectedItemPosition();
+        return (pos >= 0 && pos < values.length) ? values[pos] : "simplex";
     }
 
     /** 上传过程中禁用/恢复方向选择（RadioGroup 不会自动级联到子项）。 */
@@ -553,7 +627,7 @@ public class ShareActivity extends Activity {
             mPreviewCard.setVisibility(View.VISIBLE);
             mPagesEnabled = false;
             mPagesPanel.setVisibility(View.GONE);
-            renderImagePreview(item);
+            renderImagePreview(item, currentOrientation());
         } else {
             // Office / 文本：无法直接预览，但页码仍可手填（服务端转换后生效）
             mPreviewCard.setVisibility(View.VISIBLE);
@@ -682,34 +756,31 @@ public class ShareActivity extends Activity {
         });
     }
 
-    private void renderImagePreview(final Item item) {
+    /**
+     * 图片预览：不再直接显示原图，而是渲染「转成 PDF 后」的页面效果
+     * （白底页面 + 按当前方向/留白缩放居中），让用户确认最终打印形态。
+     */
+    private void renderImagePreview(final Item item, final String orientation) {
         final long token = mPreviewToken;
         mPreviewInfo.setText(getString(R.string.share_preview_loading));
         mThumbScroll.setVisibility(View.GONE);
-        final int target = dp(180);
         if (mPreviewExecutor == null) {
             return;
         }
         mPreviewExecutor.execute(new Runnable() {
             @Override
             public void run() {
-                Bitmap bitmap = null;
+                Bitmap page = null;
                 try {
-                    BitmapFactory.Options bounds = new BitmapFactory.Options();
-                    bounds.inJustDecodeBounds = true;
-                    BitmapFactory.decodeByteArray(item.bytes, 0, item.bytes.length, bounds);
-                    int sample = 1;
-                    while (bounds.outWidth / (sample * 2) >= target
-                            && bounds.outHeight / (sample * 2) >= target) {
-                        sample *= 2;
+                    Bitmap source = decodeScaledBitmap(item.bytes, MAX_IMAGE_SIDE);
+                    if (source != null) {
+                        page = renderPageMock(source, orientation);
+                        source.recycle();
                     }
-                    BitmapFactory.Options decode = new BitmapFactory.Options();
-                    decode.inSampleSize = sample;
-                    bitmap = BitmapFactory.decodeByteArray(item.bytes, 0, item.bytes.length, decode);
                 } catch (Throwable ignored) {
                     // 无法解码时退化为通用提示
                 }
-                final Bitmap result = bitmap;
+                final Bitmap result = page;
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
@@ -722,7 +793,11 @@ public class ShareActivity extends Activity {
                             mThumbScroll.setVisibility(View.GONE);
                             return;
                         }
-                        mPreviewInfo.setText(getString(R.string.share_preview_pages, 1));
+                        String dir = "landscape".equals(orientation)
+                                ? getString(R.string.share_orientation_landscape)
+                                : getString(R.string.share_orientation_portrait);
+                        mPreviewInfo.setText(getString(R.string.share_preview_pages, 1)
+                                + "\n" + getString(R.string.share_preview_final, dir));
                         mThumbStrip.removeAllViews();
                         mThumbCells.clear();
                         ImageView view = new ImageView(ShareActivity.this);
@@ -736,6 +811,30 @@ public class ShareActivity extends Activity {
                 });
             }
         });
+    }
+
+    /** 按页面比例、留白与方向把图片画成预览位图，模拟最终 PDF 的打印效果。 */
+    private static Bitmap renderPageMock(Bitmap source, String orientation) {
+        boolean landscape = "landscape".equals(orientation);
+        int pageW = landscape ? PDF_PAGE_HEIGHT : PDF_PAGE_WIDTH;
+        int pageH = landscape ? PDF_PAGE_WIDTH : PDF_PAGE_HEIGHT;
+        int outW = PREVIEW_THUMB_WIDTH;
+        int outH = Math.max(1, Math.round((float) pageH / pageW * outW));
+        Bitmap out = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(out);
+        canvas.drawColor(Color.WHITE);
+        float margin = (float) PDF_PAGE_MARGIN / pageW * outW;
+        float availW = outW - margin * 2f;
+        float availH = outH - margin * 2f;
+        float fit = Math.min(availW / source.getWidth(), availH / source.getHeight());
+        float dw = source.getWidth() * fit;
+        float dh = source.getHeight() * fit;
+        float left = (outW - dw) / 2f;
+        float top = (outH - dh) / 2f;
+        RectF dst = new RectF(left, top, left + dw, top + dh);
+        Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
+        canvas.drawBitmap(source, null, dst, paint);
+        return out;
     }
 
     private void addThumb(Bitmap bitmap, final int index) {
@@ -1302,16 +1401,21 @@ public class ShareActivity extends Activity {
             return;
         }
 
-        // 打印方向：纵向 / 横向（工作线程不能访问控件，这里先取好）
-        String orientation = (mOrientationGroup != null
-                && mOrientationGroup.getCheckedRadioButtonId() == R.id.share_orientation_landscape)
-                ? "landscape" : "portrait";
-
-        beginUpload(base, copies, pages, orientation, queue, problems);
+        // 打印方向与双面模式（工作线程不能访问控件，这里先取好）
+        String orientation = currentOrientation();
+        String side = mTextMode ? "simplex" : currentSide();
+        if ("manual".equals(side)) {
+            // 手动双面第 1 步：先打印奇数页（单面），成功后提示翻面再打印偶数页
+            beginUpload(base, copies, pages, orientation, "simplex", "odd", true, null, queue, problems);
+        } else {
+            beginUpload(base, copies, pages, orientation, side, "", false, null, queue, problems);
+        }
     }
 
     private void beginUpload(final String baseUrl, final int copies, final String pages,
-            final String orientation, final List<Item> queue, final List<String> problems) {
+            final String orientation, final String side, final String subset,
+            final boolean manualFirst, final List<String> duplexTokens,
+            final List<Item> queue, final List<String> problems) {
         mUploading = true;
         mPrintButton.setEnabled(false);
         mCopiesInput.setEnabled(false);
@@ -1319,6 +1423,9 @@ public class ShareActivity extends Activity {
         mPageFromInput.setEnabled(false);
         mPageToInput.setEnabled(false);
         setOrientationEnabled(false);
+        if (mSideSpinner != null) {
+            mSideSpinner.setEnabled(false);
+        }
         mProgress.setVisibility(View.VISIBLE);
         mResultView.setTextColor(0xFF616161);
         mResultView.setText(mTextMode
@@ -1339,10 +1446,9 @@ public class ShareActivity extends Activity {
                     if (mTextMode) {
                         result.add(submitText(baseUrl, cookie, copies, mTextContent, textLabel));
                     } else {
-                        int index = 0;
-                        for (Item item : queue) {
-                            index++;
-                            final int current = index;
+                        for (int i = 0; i < queue.size(); i++) {
+                            final int current = i + 1;
+                            final Item item = queue.get(i);
                             final String name = item.name;
                             runOnUiThread(new Runnable() {
                                 @Override
@@ -1352,7 +1458,11 @@ public class ShareActivity extends Activity {
                                             + "\n" + name);
                                 }
                             });
-                            result.add(submitFile(baseUrl, cookie, copies, pages, orientation, item));
+                            // 手动双面第 2 步：每个文件用自己第 1 步留下的令牌免扣配额
+                            String token = (duplexTokens != null && i < duplexTokens.size())
+                                    ? duplexTokens.get(i) : null;
+                            result.add(submitFile(baseUrl, cookie, copies, pages, orientation,
+                                    side, subset, token, manualFirst, item));
                         }
                     }
                 } catch (Throwable t) {
@@ -1368,7 +1478,12 @@ public class ShareActivity extends Activity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            finishUpload(result, problems);
+                            if (manualFirst) {
+                                finishManualFirstPass(result, problems, baseUrl,
+                                        copies, pages, orientation, queue);
+                            } else {
+                                finishUpload(result, problems);
+                            }
                         }
                     });
                 }
@@ -1376,15 +1491,60 @@ public class ShareActivity extends Activity {
         });
     }
 
-    private void finishUpload(UploadResult result, List<String> problems) {
+    /**
+     * 手动双面第 1 步（奇数页）结束：
+     * 成功则记住参数、显示「继续打印偶数页」；有失败则按普通流程报错并放弃第 2 步。
+     */
+    private void finishManualFirstPass(UploadResult result, List<String> problems, String baseUrl,
+            int copies, String pages, String orientation, List<Item> queue) {
+        if (result.failures() > 0) {
+            finishUpload(result, problems);
+            return;
+        }
         mUploading = false;
         mProgress.setVisibility(View.GONE);
+        // 记住第 2 步所需的一切（此时其余控件仍保持禁用，避免中途改动）
+        mManualDuplex = true;
+        mManualQueue = queue;
+        mManualProblems = problems;
+        mManualBaseUrl = baseUrl;
+        mManualCopies = copies;
+        mManualPages = pages;
+        mManualOrientation = orientation;
+        // 收集各文件第 1 步返回的令牌（与 queue 顺序一致），供第 2 步免扣配额
+        mManualTokens = new ArrayList<>();
+        for (Result r : result.results) {
+            mManualTokens.add(r != null && r.duplexToken != null ? r.duplexToken : "");
+        }
+        mResultView.setTextColor(0xFF616161);
+        mResultView.setText(getString(R.string.share_manual_hint));
+        mManualContinueButton.setVisibility(View.VISIBLE);
+    }
+
+    /** 手动双面第 2 步：打印偶数页并结束。 */
+    private void onManualContinue() {
+        if (mUploading || !mManualDuplex || mManualQueue == null) {
+            return;
+        }
+        mManualContinueButton.setVisibility(View.GONE);
+        beginUpload(mManualBaseUrl, mManualCopies, mManualPages, mManualOrientation,
+                "simplex", "even", false, mManualTokens, mManualQueue, mManualProblems);
+    }
+
+    private void finishUpload(UploadResult result, List<String> problems) {
+        mUploading = false;
+        mManualDuplex = false;
+        mProgress.setVisibility(View.GONE);
+        mManualContinueButton.setVisibility(View.GONE);
         mPrintButton.setEnabled(true);
         mCopiesInput.setEnabled(true);
         mServerSpinner.setEnabled(true);
         mPageFromInput.setEnabled(true);
         mPageToInput.setEnabled(true);
         setOrientationEnabled(true);
+        if (mSideSpinner != null) {
+            mSideSpinner.setEnabled(true);
+        }
 
         int failures = result.failures();
         String quota = quotaSuffix(result.lastQuota);
@@ -1603,7 +1763,8 @@ public class ShareActivity extends Activity {
     }
 
     private Result submitFile(String baseUrl, String cookie, int copies, String pages,
-            String orientation, Item item) {
+            String orientation, String side, String subset, String duplexToken,
+            boolean duplexManual, Item item) {
         Item upload = item;
         // 图片在客户端转成单页 PDF 再上传：打印主机用 Office/WPS 转图片不稳定，
         // 转成 PDF 后服务端只需处理 PDF，链路更可靠。方向决定 PDF 页面是横版还是竖版。
@@ -1618,7 +1779,8 @@ public class ShareActivity extends Activity {
         }
         HttpURLConnection conn = null;
         try {
-            MultipartBody body = buildMultipart(upload, copies, pages, orientation);
+            MultipartBody body = buildMultipart(upload, copies, pages, orientation, side, subset,
+                    duplexToken, duplexManual);
             URL url = new URL(baseUrl + "/api/print");
             conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
@@ -1743,6 +1905,7 @@ public class ShareActivity extends Activity {
                     result.taskId = task.optString("id", null);
                 }
                 result.quota = json.optJSONObject("quota");
+                result.duplexToken = json.optString("duplexToken", null);
             }
             return result;
         }
@@ -1794,19 +1957,24 @@ public class ShareActivity extends Activity {
      * <p>字段名与服务端 {@code upload.single('file')} 严格对应：
      * {@code file} / {@code copies} / {@code pages}（空串 = 全部页）/
      * {@code color}（固定 mono）/ {@code paperSize}（固定 A4）/
-     * {@code orientation}（portrait / landscape）/ {@code printer}（空 = 默认打印机）。
+     * {@code orientation}（portrait / landscape）/ {@code side}（simplex / duplexlong / duplexshort）/
+     * {@code subset}（odd / even，手动双面用，空 = 全部）/ {@code printer}（空 = 默认打印机）。
      * 文件部分不带 {@code Content-Type}，由服务端按扩展名与文件头校验。
      *
      * <p>先算出总长度再一次性写出，目的是能给出准确的 {@code Content-Length}
      * （服务端 multer 也能据此拒绝超大请求）。
      */
-    private MultipartBody buildMultipart(Item item, int copies, String pages, String orientation) {
+    private MultipartBody buildMultipart(Item item, int copies, String pages,
+            String orientation, String side, String subset, String duplexToken, boolean duplexManual) {
         String boundary = "----WebPrintAndroid"
                 + Long.toHexString(System.currentTimeMillis())
                 + Long.toHexString(Double.doubleToLongBits(Math.random()));
         Charset utf8 = Charset.forName("UTF-8");
         String pageValue = pages == null ? "" : pages;
         String orientationValue = "landscape".equals(orientation) ? "landscape" : "portrait";
+        String sideValue = ("duplexlong".equals(side) || "duplexshort".equals(side)) ? side : "simplex";
+        String subsetValue = ("odd".equals(subset) || "even".equals(subset)) ? subset : "";
+        String tokenValue = duplexToken == null ? "" : duplexToken;
 
         ByteArrayOutputStream head = new ByteArrayOutputStream();
         try {
@@ -1816,6 +1984,10 @@ public class ShareActivity extends Activity {
                     {"color", "mono"},
                     {"paperSize", "A4"},
                     {"orientation", orientationValue},
+                    {"side", sideValue},
+                    {"subset", subsetValue},
+                    {"duplexManual", duplexManual ? "1" : ""},
+                    {"duplexToken", tokenValue},
                     {"printer", ""}}) {
                 head.write(("--" + boundary + "\r\n").getBytes(utf8));
                 head.write(("Content-Disposition: form-data; name=\"" + field[0] + "\"\r\n\r\n")
@@ -2051,6 +2223,8 @@ public class ShareActivity extends Activity {
         final String error;
         String taskId;
         JSONObject quota;
+        /** 手动双面第 1 步返回的一次性令牌，第 2 步凭它免扣配额。 */
+        String duplexToken;
 
         private Result(String name, boolean ok, String error) {
             this.name = name;

@@ -20,7 +20,7 @@
 
 **宣传视频**
 
-https://github.com/user-attachments/assets/e116ce70-4e9c-42e1-9f83-710946c746c9
+https://github.com/user-attachments/assets/c9149bc9-dfb2-429f-8b45-df8d88230852
 
 **桌面应用（概览 / 隧道 / 设置 / 关于）**
 
